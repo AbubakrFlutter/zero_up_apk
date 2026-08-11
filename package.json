@@ -14,13 +14,13 @@
   ],
   "author": "Zero Up Team",
   "license": "MIT",
-  "homepage": "https://github.com/zero_up_team/zero_up_apk#readme",
+  "homepage": "https://github.com/AbubakrFlutter/zero_up_apk#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zero_up_team/zero_up_apk.git"
+    "url": "git+https://github.com/AbubakrFlutter/zero_up_apk.git"
   },
   "bugs": {
-    "url": "https://github.com/zero_up_team/zero_up_apk/issues"
+    "url": "https://github.com/AbubakrFlutter/zero_up_apk/issues"
   },
   "bin": {
     "zup": "./bin/zup.js",

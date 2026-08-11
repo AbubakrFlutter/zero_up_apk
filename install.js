@@ -7,7 +7,7 @@ const https = require('https');
 const { execSync } = require('child_process');
 
 const VERSION = '1.3.0';
-const REPO_OWNER = 'zero_up_team';
+const REPO_OWNER = 'AbubakrFlutter';
 const REPO_NAME = 'zero_up_apk';
 
 // Platform aniqlash

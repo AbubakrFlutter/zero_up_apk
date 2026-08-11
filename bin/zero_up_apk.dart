@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:zero_up_apk/zero_up_apk.dart';
 
 const currentVersion = '1.3.0';
-const repoOwner = 'zero_up_team';
+const repoOwner = 'AbubakrFlutter';
 const repoName = 'zero_up_apk';
 
 Future<void> main(List<String> args) async {
