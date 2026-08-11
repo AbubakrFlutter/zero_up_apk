@@ -6,7 +6,7 @@ const os = require('os');
 const https = require('https');
 const { execSync } = require('child_process');
 
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 const REPO_OWNER = 'AbubakrFlutter';
 const REPO_NAME = 'zero_up_apk';
 

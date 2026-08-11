@@ -14,7 +14,7 @@ import 'output_manager.dart';
 import 'project_info.dart';
 import 'system_info.dart';
 
-const zeroUpApkVersion = '1.3.0';
+const zeroUpApkVersion = '1.3.1';
 
 /// Buyruq qatori interfeysi — barcha bosqichlarni boshqaradi.
 class ZeroUpApkCli {

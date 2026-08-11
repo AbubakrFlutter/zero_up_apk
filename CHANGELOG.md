@@ -1,3 +1,20 @@
+## 1.3.1 - 2026-08-11
+
+### 🔧 Yaxshilanishlar
+
+* **Har safar yangilanish tekshirish** - 24 soatlik cooldown olib tashlandi, har safar `zup apk` yoki `zup aab` ishlatganda yangilanish tekshiriladi
+* **Yaxshiroq xabar berish** - Agar GitHub ga ulanib bo'lmasa, aniq va tushunarli xabar ko'rsatiladi
+* **To'g'ri feedback** - `zup update` ishlatganda:
+  * Agar allaqachon eng so'nggi versiyada bo'lsa: "✅ Siz allaqachon eng so'nggi versiyada"
+  * Agar GitHub ga ulanib bo'lmasa: Batafsil sabablari bilan xabar
+  * Agar yangi versiya bo'lsa: Yangilanadi
+
+### Foydalanuvchi tajribasi
+
+* Faqat yangi versiya bo'lganda xabar ko'rsatiladi - ortiqcha bezovta qilmaydi
+* Internet muammosi va "yangilanish yo'q" holatini aniq ajratish
+* Har safar eng so'nggi versiya mavjudligini tekshirish
+
 ## 1.3.0 - 2026-08-11
 
 ### 🎉 Katta yangiliklar
