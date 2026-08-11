@@ -1,0 +1,13 @@
+include: package:lints/recommended.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+
+linter:
+  rules:
+    # prefer_single_quotes qasddan yoqilmagan: o'zbekcha matnlarda apostrof
+    # ko'p uchraydi, shuning uchun qo'shtirnoq ham ishlatiladi.
+    - directives_ordering
+    - unawaited_futures

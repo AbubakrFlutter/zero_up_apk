@@ -1,0 +1,27 @@
+# Test fayllar
+test/
+*.test.dart
+
+# Dart build fayllar
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS fayllar
+.DS_Store
+Thumbs.db
+
+# Keraksiz fayllar
+*.log
+*.tmp
+
+# Git
+.git/
+.gitignore
