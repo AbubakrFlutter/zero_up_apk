@@ -65,13 +65,14 @@ Future<void> main(List<String> args) async {
   }
 
   // Har qanday buyruq ishga tushganda yangilanishni tekshirish (fonda)
+  // 24 soat cooldown yo'q - har safar tekshiriladi
   _checkUpdateInBackground();
 
   // Asosiy buyruqni bajarish
   exitCode = await ZeroUpApkCli().run(args);
 }
 
-/// Fonda yangilanish tekshirish va xabar berish
+/// Fonda yangilanish tekshirish va xabar berish (har safar)
 void _checkUpdateInBackground() {
   Future(() async {
     try {
@@ -81,9 +82,10 @@ void _checkUpdateInBackground() {
         repoName: repoName,
       );
 
-      final latestVersion = await checker.getUpdateIfAvailable();
+      // Har safar tekshirish (24 soat cooldown yo'q)
+      final latestVersion = await checker.fetchLatestVersion();
 
-      if (latestVersion != null) {
+      if (latestVersion != null && latestVersion != currentVersion) {
         print('');
         print('╭────────────────────────────────────────────────────────╮');
         print('│  💡 Yangi versiya mavjud!                             │');
@@ -94,7 +96,7 @@ void _checkUpdateInBackground() {
         print('');
       }
     } catch (_) {
-      // Xato bo'lsa, indamay o'tamiz
+      // Xato bo'lsa, indamay o'tamiz (internet yo'q yoki GitHub muammosi)
     }
   });
 }
@@ -121,8 +123,14 @@ Future<int> _performUpdate() async {
     final latestVersion = await checker.fetchLatestVersion();
 
     if (latestVersion == null) {
-      print('❌ GitHub API dan ma\'lumot olishda xato.');
-      print('   Internet aloqasini tekshiring.');
+      print('⚠️  GitHub Releases ga ulanib bo\'lmadi.');
+      print('');
+      print('💡 Mumkin bo\'lgan sabablar:');
+      print('   • Internet aloqasi yo\'q');
+      print('   • GitHub Releases da yangilanish yo\'q');
+      print('   • GitHub vaqtincha band');
+      print('');
+      print('📦 Hozirgi versiya: $currentVersion');
       print('');
       return 1;
     }
