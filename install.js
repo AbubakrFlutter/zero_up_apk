@@ -38,7 +38,7 @@ let downloadUrl;
 
 if (platform === 'win32') {
   binaryName = 'zup.exe';
-  downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${VERSION}/zup_windows_x64.exe`;
+  downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${VERSION}/zup_windows_x64.exe.exe`;
 } else if (platform === 'darwin') {
   binaryName = 'zup';
   downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${VERSION}/zup_macos_${arch}`;
