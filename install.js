@@ -38,13 +38,13 @@ let downloadUrl;
 
 if (platform === 'win32') {
   binaryName = 'zup.exe';
-  downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${VERSION}/zup_windows_x64.exe`;
+  downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/zup_windows_x64.exe`;
 } else if (platform === 'darwin') {
   binaryName = 'zup';
-  downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${VERSION}/zup_macos_${arch}`;
+  downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/zup_macos_${arch}`;
 } else if (platform === 'linux') {
   binaryName = 'zup';
-  downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${VERSION}/zup_linux_${arch}`;
+  downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/zup_linux_${arch}`;
 } else {
   console.error('❌ Platform qo\'llab-quvvatlanmaydi:', platform);
   process.exit(1);
