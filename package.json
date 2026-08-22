@@ -1,6 +1,6 @@
 {
   "name": "zero_up_apk",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Flutter APK va App Bundle fayllarini oddiy 'flutter build' dan 2-3 barobar tezroq yig'adigan, to'liq o'zbekcha buyruq qatori vositasi",
   "keywords": [
     "flutter",
@@ -26,6 +26,15 @@
     "zup": "./bin/zup.js",
     "zero_up_apk": "./bin/zup.js"
   },
+  "files": [
+    "bin/zup.js",
+    "bin/zup_windows_x64.exe",
+    "install.js",
+    "lib/",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "postinstall": "node install.js",
     "test": "echo \"Tests coming soon\""

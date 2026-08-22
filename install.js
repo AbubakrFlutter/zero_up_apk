@@ -6,7 +6,7 @@ const os = require('os');
 const https = require('https');
 const { execSync } = require('child_process');
 
-const VERSION = '1.3.1';
+const VERSION = '1.3.2';
 const REPO_OWNER = 'AbubakrFlutter';
 const REPO_NAME = 'zero_up_apk';
 
@@ -50,10 +50,20 @@ if (platform === 'win32') {
   process.exit(1);
 }
 
+// Local binary nomi (package.json da "bin" maydonida ko'rsatilgan)
+let localBinaryName;
+if (platform === 'win32') {
+  localBinaryName = 'zup_windows_x64.exe';
+} else if (platform === 'darwin') {
+  localBinaryName = 'zup_macos_' + arch;
+} else if (platform === 'linux') {
+  localBinaryName = 'zup_linux_' + arch;
+}
+
 const targetPath = path.join(zupDir, binaryName);
 
 // Binary mavjudligini tekshirish
-const localBinary = path.join(__dirname, 'bin', binaryName);
+const localBinary = path.join(__dirname, 'bin', localBinaryName);
 if (fs.existsSync(localBinary)) {
   // Local binary mavjud - ko'chirish
   console.log('📁 Binary ko\'chirilmoqda...');

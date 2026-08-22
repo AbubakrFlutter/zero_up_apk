@@ -633,7 +633,7 @@ class ZeroUpApkCli {
     ..addFlag('open', defaultsTo: false, help: 'Tugagach papkani ochish.')
     ..addOption('out', help: "Boshqa chiqish papkasi yo'li.")
     ..addOption('flavor', help: 'Flavor nomi.')
-    ..addMultiOption('dart-define', help: 'KEY=VALUE ko\'rinishida.')
+    ..addMultiOption('dart-define', help: 'KEY=VALUE ko\'rinishida (bir necha marta ishlatish mumkin). Misol: --dart-define=API_URL=https://api.example.com --dart-define=ENV=production')
     ..addOption('build-name', help: 'Versiya nomini almashtirish.')
     ..addOption('build-number', help: 'Build raqamini almashtirish.')
     ..addFlag(
@@ -681,6 +681,10 @@ class ZeroUpApkCli {
     ui.line(
       '    ${ui.cyan("zup apk -p C:\\loyiham")}   '
       '${ui.grey("boshqa papkadagi loyiha")}',
+    );
+    ui.line(
+      '    ${ui.cyan("zup apk --dart-define=API_URL=https://api.example.com")} '
+      '${ui.grey("Dart define parametrlar bilan yig\'ish")}',
     );
     ui.line(
       '    ${ui.cyan("zup --restore-gradle")}    '

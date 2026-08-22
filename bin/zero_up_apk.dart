@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:zero_up_apk/zero_up_apk.dart';
 
-const currentVersion = '1.3.1';
+const currentVersion = '1.3.2';
 const repoOwner = 'AbubakrFlutter';
 const repoName = 'zero_up_apk';
 

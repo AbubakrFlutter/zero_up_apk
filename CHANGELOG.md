@@ -1,3 +1,15 @@
+## 1.3.2 - 2026-08-22
+
+### 🐞 Bug tuzatishlar
+
+* **npm install muammosi tuzatildi** - `install.js` da binary nomi mos kelmasligi sababli npm orqali o'rnatib bo'lmaydigan xato hal qilindi
+* **`--dart-define` hujjati yaxshilandi** - CLI yordamida misol va batafsil tavsif qo'shildi
+
+### ♻️ Ichki yaxshilanishlar
+
+* `install.js` platformaga mos binary nomlarini to'g'ri ishlatadi (`zup_windows_x64.exe`, `zup_macos_<arch>`, `zup_linux_<arch>`)
+* `package.json` ga `files` massivi qo'shildi - to'g'ri fayllar paketlenadi
+
 ## 1.3.1 - 2026-08-11
 
 ### 🔧 Yaxshilanishlar
