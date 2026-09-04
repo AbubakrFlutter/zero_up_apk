@@ -2,7 +2,10 @@ import 'dart:io';
 
 import 'package:zero_up_apk/zero_up_apk.dart';
 
-const currentVersion = '1.3.2';
+// Versiyaning yagona manbasi — lib/src/cli.dart dagi zeroUpApkVersion.
+// Ikkita alohida konstanta ikkisi mos kelmay qolishiga olib kelgan edi
+// (masalan, banner v1.3.1 ko'rsatib turganda paket allaqachon 1.3.2 edi).
+const currentVersion = zeroUpApkVersion;
 const repoOwner = 'AbubakrFlutter';
 const repoName = 'zero_up_apk';
 
@@ -50,26 +53,63 @@ Future<void> main(List<String> args) async {
     return;
   }
 
-  // Agar argumentsiz ochilgan bo'lsa → yo'riqnoma
+  // Argumentsiz ochilgan bo'lsa:
+  //   o'rnatilmagan → o'rnatish
+  //   o'rnatilgan   → asosiy menyu (hamma amal shu yerdan bajariladi)
   if (args.isEmpty) {
     final installed = await _isInstalled();
     if (!installed) {
-      // O'rnatilmagan → o'rnatish
       exitCode = await _autoInstall();
       return;
-    } else {
-      // Allaqachon o'rnatilgan → yo'riqnoma
-      _showQuickStart();
-      return;
     }
+    exitCode = await ZeroUpApkCli().runMainMenu();
+    return;
   }
 
-  // Har qanday buyruq ishga tushganda yangilanishni tekshirish (fonda)
-  // 24 soat cooldown yo'q - har safar tekshiriladi
-  _checkUpdateInBackground();
+  // Ma'lumot beruvchi buyruqlar (--version, --help) chiqishi toza va
+  // bir xil bo'lishi kerak — fon tekshiruvi tarmoq tezligiga qarab
+  // ularning ustiga xabar chiqarib yuborardi.
+  if (!_isInfoCommand(args)) {
+    // Har qanday buyruq ishga tushganda yangilanishni tekshirish (fonda)
+    _checkUpdateInBackground();
+  }
 
   // Asosiy buyruqni bajarish
   exitCode = await ZeroUpApkCli().run(args);
+}
+
+/// `--version` / `--help` kabi faqat ma'lumot chiqaradigan buyruqmi?
+bool _isInfoCommand(List<String> args) {
+  const infoFlags = {'--version', '-v', '--help', '-h'};
+  return args.any(infoFlags.contains);
+}
+
+/// Semantik versiyalarni solishtiradi: [candidate] > [current] bo'lsa `true`.
+///
+/// Oddiy `!=` bilan solishtirish xato edi: mahalliy versiya GitHub dagidan
+/// yangiroq bo'lsa ham "yangi versiya bor" deb ko'rsatardi va `zup update`
+/// foydalanuvchini eskiroq versiyaga tushirib yuborishi mumkin edi.
+bool isNewerVersion(String candidate, String current) {
+  List<int> parse(String v) {
+    final cleaned = v.trim().replaceFirst(RegExp('^v'), '');
+    // "1.3.3+2" yoki "1.3.3-beta" — faqat raqamli qismni olamiz.
+    final core = cleaned.split(RegExp('[+-]')).first;
+    return core
+        .split('.')
+        .map((part) => int.tryParse(part.trim()) ?? 0)
+        .toList();
+  }
+
+  final a = parse(candidate);
+  final b = parse(current);
+  final length = a.length > b.length ? a.length : b.length;
+
+  for (var i = 0; i < length; i++) {
+    final x = i < a.length ? a[i] : 0;
+    final y = i < b.length ? b[i] : 0;
+    if (x != y) return x > y;
+  }
+  return false;
 }
 
 /// Fonda yangilanish tekshirish va xabar berish (har safar)
@@ -85,11 +125,13 @@ void _checkUpdateInBackground() {
       // Har safar tekshirish (24 soat cooldown yo'q)
       final latestVersion = await checker.fetchLatestVersion();
 
-      if (latestVersion != null && latestVersion != currentVersion) {
+      if (latestVersion != null && isNewerVersion(latestVersion, currentVersion)) {
         print('');
         print('╭────────────────────────────────────────────────────────╮');
         print('│  💡 Yangi versiya mavjud!                             │');
-        print('│     Hozirgi: $currentVersion → Yangi: $latestVersion'.padRight(57) + '│');
+        final row =
+            '│     Hozirgi: $currentVersion → Yangi: $latestVersion'.padRight(57);
+        print('$row│');
         print('│                                                        │');
         print('│     Yangilash: zup update                             │');
         print('╰────────────────────────────────────────────────────────╯');
@@ -135,8 +177,11 @@ Future<int> _performUpdate() async {
       return 1;
     }
 
-    if (latestVersion == currentVersion) {
+    if (!isNewerVersion(latestVersion, currentVersion)) {
       print('✅ Siz allaqachon eng so\'nggi versiyada ($currentVersion)');
+      if (latestVersion != currentVersion) {
+        print('   (GitHub dagi so\'nggi reliz: $latestVersion)');
+      }
       print('');
       return 0;
     }
@@ -234,47 +279,29 @@ Future<int> _performUpdate() async {
   }
 }
 
-/// Allaqachon o'rnatilgan bo'lganda ko'rsatiladigan qisqa yo'riqnoma
-void _showQuickStart() {
-  print('');
-  print('╔══════════════════════════════════════════════════════════════╗');
-  print('║                    ⚡ Zero Up APK                           ║');
-  print('╚══════════════════════════════════════════════════════════════╝');
-  print('');
-  print('✅ zup allaqachon o\'rnatilgan!');
-  print('');
-  print('📌 QANDAY ISHLATISH:');
-  print('');
-  print('   1. Flutter loyihangizga kiring:');
-  print('      cd C:\\mening_loyiham');
-  print('');
-  print('   2. APK yasash:');
-  print('      zup apk');
-  print('');
-  print('   3. Faqat arm64 (tezroq):');
-  print('      zup apk --arm64');
-  print('');
-  print('   4. App Bundle (Google Play):');
-  print('      zup aab');
-  print('');
-  print('   5. Yordam:');
-  print('      zup --help');
-  print('');
-  print('💡 MASLAHAT: Telefonga o\'rnatish uchun arm64 faylini oling.');
-  print('');
-  print('🚀 Hozir terminaldan chiqib, Flutter loyihangizga kiring!');
-  print('');
-}
-
-/// O'rnatilgan joyda ekanligini yoki PATH da borligini tekshiradi
+/// O'rnatilgan joyda ekanligini yoki PATH da borligini tekshiradi.
+///
+/// MUHIM: faqat `where` ga tayanib bo'lmaydi. Ochiq turgan terminal PATH
+/// nusxasini o'zi ochilganda bir marta o'qiydi — o'rnatuvchi registry ni
+/// yangilagan bo'lsa ham, eski terminal buni ko'rmaydi. Shu sababli
+/// hammasi joyida bo'lsa ham "o'rnatilmagan" deb hisoblanib, har safar
+/// o'rnatish ekrani qayta-qayta chiqardi.
 Future<bool> _isInstalled() async {
-  // PATH da zup.exe borligini tekshirish
+  final targetExe = _installedExe();
+
+  // Fayl umuman yo'q bo'lsa — aniq o'rnatilmagan.
+  if (targetExe != null && targetExe.existsSync()) {
+    // Fayl bor. Doimiy (registry) PATH da ham bormi?
+    if (await _zupDirInPersistentPath()) return true;
+  }
+
+  // Zaxira: joriy jarayonning PATH i bo'yicha tekshiramiz.
   try {
     final result = await Process.run(
       'where',
       ['zup', 'zup.exe'],
       runInShell: true,
-    );
+    ).timeout(const Duration(seconds: 10));
 
     if (result.exitCode == 0) {
       final output = result.stdout.toString();
@@ -283,6 +310,40 @@ Future<bool> _isInstalled() async {
   } catch (_) {}
 
   return false;
+}
+
+/// `~/.zup/zup.exe` fayli (o'rnatilgan nusxa).
+File? _installedExe() {
+  final homeDir = Platform.environment['USERPROFILE'] ??
+      Platform.environment['HOME'] ??
+      '';
+  if (homeDir.isEmpty) return null;
+  return File('$homeDir\\.zup\\zup.exe');
+}
+
+/// `.zup` papkasi foydalanuvchining doimiy (registry) PATH ida bormi?
+///
+/// Joriy terminalning eskirgan PATH nusxasidan farqli o'laroq, bu
+/// haqiqiy holatni ko'rsatadi.
+Future<bool> _zupDirInPersistentPath() async {
+  if (!Platform.isWindows) return false;
+
+  final homeDir = Platform.environment['USERPROFILE'] ?? '';
+  if (homeDir.isEmpty) return false;
+  final zupDir = '$homeDir\\.zup'.toLowerCase();
+
+  try {
+    final result = await Process.run(
+      'reg',
+      ['query', 'HKCU\\Environment', '/v', 'Path'],
+      runInShell: true,
+    ).timeout(const Duration(seconds: 10));
+
+    if (result.exitCode != 0) return false;
+    return result.stdout.toString().toLowerCase().contains(zupDir);
+  } catch (_) {
+    return false;
+  }
 }
 
 /// O'rnatilgan versiya eski bo'lsa yangilash kerakligini tekshirish
@@ -305,8 +366,9 @@ Future<bool> _checkIfNeedsUpdate() async {
         // "zero_up_apk 1.2.0" → "1.2.0"
         final versionMatch = RegExp(r'(\d+\.\d+\.\d+)').firstMatch(output);
         if (versionMatch != null) {
-          final installedVersion = versionMatch.group(1);
-          return installedVersion != currentVersion;
+          final installedVersion = versionMatch.group(1)!;
+          // Faqat o'rnatilgani eskiroq bo'lsa yangilash kerak.
+          return isNewerVersion(currentVersion, installedVersion);
         }
       }
     } catch (_) {}
@@ -320,7 +382,7 @@ Future<bool> _checkIfNeedsUpdate() async {
       final versionFile = File('$homeDir\\.zup\\VERSION');
       if (versionFile.existsSync()) {
         final installedVersion = versionFile.readAsStringSync().trim();
-        return installedVersion != currentVersion;
+        return isNewerVersion(currentVersion, installedVersion);
       }
     }
   } catch (_) {}
@@ -399,9 +461,24 @@ Future<int> _autoInstall() async {
     }
 
     // 2. exe ni ko'chirish
-    if (exePath != targetExe.path) {
-      final exeFile = File(exePath);
-      exeFile.copySync(targetExe.path);
+    if (exePath.toLowerCase() != targetExe.path.toLowerCase()) {
+      // Windows'da mavjud fayl ustiga copySync xato beradi
+      // (ERROR_ALREADY_EXISTS) — avval eskisini olib tashlaymiz.
+      // Aks holda qayta o'rnatishda dastur shu yerda qulab tushib,
+      // PATH ga qo'shish bosqichiga umuman yetib bormasdi.
+      if (targetExe.existsSync()) {
+        try {
+          targetExe.deleteSync();
+        } on FileSystemException catch (e) {
+          print('❌ Eski zup.exe ni almashtirib bo\'lmadi');
+          print('   Sabab: ${e.osError?.message ?? e.message}');
+          print('');
+          print('💡 Ochiq turgan zup jarayonini yoping va qaytadan urining.');
+          print('');
+          return 1;
+        }
+      }
+      File(exePath).copySync(targetExe.path);
       print('✅ zup.exe ko\'chirildi');
     }
 
@@ -414,6 +491,11 @@ Future<int> _autoInstall() async {
 
     final installPathForPs = installDir.path.replaceAll('/', '\\');
 
+    // Skriptni vaqtinchalik .ps1 faylga yozib -File bilan ishga tushiramiz.
+    // -Command orqali ko'p qatorli skript yuborilsa, runInShell:true cmd.exe
+    // orqali argumentlarni qayta parslaydi va ichidagi qo'shtirnoqlarni
+    // yeb qo'yishi mumkin — bu esa skriptni jim-jimgina buzib, PATH hech
+    // qachon yozilmagan holda "muvaffaqiyatli" deb noto'g'ri xabar berardi.
     final psScript = '''
 \$ErrorActionPreference = "Stop"
 try {
@@ -439,17 +521,41 @@ try {
 }
 ''';
 
-    final result = await Process.run(
-      'powershell',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
-      runInShell: true,
+    final scriptFile = File(
+      '${Directory.systemTemp.path}\\zup_addpath_${DateTime.now().microsecondsSinceEpoch}.ps1',
     );
+    scriptFile.writeAsStringSync(psScript);
+
+    ProcessResult result;
+    try {
+      result = await Process.run(
+        'powershell',
+        [
+          '-NoProfile',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-File',
+          scriptFile.path,
+        ],
+      );
+    } finally {
+      try {
+        scriptFile.deleteSync();
+      } catch (_) {}
+    }
 
     final output = result.stdout.toString().trim();
+    final stderrOutput = result.stderr.toString().trim();
 
-    if (output.startsWith('ERROR:')) {
+    if (result.exitCode != 0 || output.startsWith('ERROR:')) {
       print('❌ PATH ga qo\'shib bo\'lmadi');
-      print('   Xato: ${output.substring(6)}');
+      if (output.startsWith('ERROR:')) {
+        print('   Xato: ${output.substring(6)}');
+      } else if (stderrOutput.isNotEmpty) {
+        print('   Xato: $stderrOutput');
+      } else {
+        print('   Xato: kutilmagan holat (exit code: ${result.exitCode})');
+      }
       print('');
       print('⚠️  zup.exe ko\'chirildi, lekin PATH ga qo\'shilmadi.');
       print('   Qo\'lda qo\'shing: ${installDir.path}');
@@ -459,6 +565,15 @@ try {
       print('✅ PATH ga qo\'shildi!');
     } else if (output == 'ALREADY') {
       print('ℹ️  PATH da allaqachon mavjud');
+    } else {
+      // Kutilmagan chiqish — muvaffaqiyat deb noto'g'ri e'lon qilmaymiz.
+      print('❌ PATH ga qo\'shib bo\'lmadi');
+      print('   Kutilmagan javob: $output');
+      print('');
+      print('⚠️  zup.exe ko\'chirildi, lekin PATH ga qo\'shilmadi.');
+      print('   Qo\'lda qo\'shing: ${installDir.path}');
+      print('');
+      return 1;
     }
 
     print('');

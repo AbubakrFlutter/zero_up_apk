@@ -19,15 +19,18 @@ if (!fs.existsSync(binaryPath)) {
   console.error('❌ zup binary topilmadi:', binaryPath);
   console.log('');
   console.log('💡 Qayta o\'rnatib ko\'ring:');
-  console.log('   npm install -g github:zero_up_team/zero_up_apk');
+  console.log('   npm install -g zero_up_apk');
   console.log('');
   process.exit(1);
 }
 
-// Dart binary ni ishga tushirish
+// Dart binary ni ishga tushirish.
+// shell:true ISHLATILMAYDI — u argumentlarni qalqonlamasdan qo'shib
+// yuboradi, ya'ni bo'sh joyli yo'llar buziladi (--out "D:\Mening APK")
+// va Node har safar DEP0190 ogohlantirishini chiqaradi.
+// binaryPath to'liq yo'l bo'lgani uchun shell umuman kerak emas.
 const child = spawn(binaryPath, process.argv.slice(2), {
-  stdio: 'inherit',
-  shell: platform === 'win32'
+  stdio: 'inherit'
 });
 
 // Exit code ni to'g'ri qaytarish

@@ -1,3 +1,35 @@
+## 1.3.3 - 2026-09-04
+
+### ✨ Yangi imkoniyatlar
+
+* **`zup config` — fayllar qayerga tushishini sozlash!** Endi har safar `--out` yozib o'tirish shart emas:
+  * `zup config` — sozlamalar menyusi (papka, avtomatik ochish, doimiy arm64)
+  * `zup config --out D:\APK` — papkani darhol o'rnatish
+  * `zup config reset` — ish stoliga qaytarish
+  * `zup apk --out D:\APK --save` — shu yig'ishdagi sozlamani doimiy qilish
+  * Sozlamalar `~/.zup/config.json` da saqlanadi
+* **`-o`** — `--out` ning qisqa shakli
+
+### 🐞 Bug tuzatishlar
+
+* **PATH ga qo'shilmasdan "muvaffaqiyatli" deb xabar berardi** — o'rnatuvchi PowerShell skriptini `runInShell` orqali chaqirar, bu esa skript ichidagi qo'shtirnoqlarni buzar edi. Xato jim yutilib, PATH hech qachon yozilmasdi va `zup` har safar qaytadan "o'rnatish" jarayonini boshlardi. Skript endi vaqtinchalik `.ps1` faylga yozilib ishga tushiriladi va har qanday xato aniq ko'rsatiladi.
+* **`-v` versiyani ko'rsatmasdi** — `-v` `--verbose` ga bog'langani uchun versiya o'rniga interaktiv menyu ochilardi. Endi `-v` = versiya, `-V` = verbose.
+* **Qayta o'rnatishda qulab tushardi** — mavjud `zup.exe` ustiga ko'chirishda `PathExistsException` chiqib, PATH bosqichiga umuman yetib borilmasdi.
+* **Bo'sh joyli papka yo'llari buzilardi** — `bin/zup.js` `shell:true` bilan argumentlarni qalqonlamasdan uzatardi (`--out "D:\Mening APK"` ishlamasdi). Bu Node'ning har safargi DEP0190 ogohlantirishini ham keltirib chiqarardi.
+* **Versiyalar noto'g'ri solishtirilardi** — oddiy `!=` ishlatilgani uchun mahalliy versiya yangiroq bo'lsa ham "yangi versiya bor" deb ko'rsatardi va `zup update` eskiroq versiyaga tushirib yuborishi mumkin edi. Endi to'g'ri semantik solishtirish ishlatiladi.
+* **Versiya raqami 3 joyda mos kelmasdi** — banner `v1.3.1` ko'rsatib turganda paket 1.3.2 edi. Endi yagona manba: `zeroUpApkVersion`.
+* **`zup -v` chiqishi beqaror edi** — fondagi yangilanish tekshiruvi tarmoq tezligiga qarab versiya chiqishiga aralashib qolardi. `--version` va `--help` uchun fon tekshiruvi o'chirildi.
+
+### 🛡 Xatolarni oldindan ushlash
+
+Endi quyidagilar **yig'ish boshlanishidan oldin** tekshiriladi (avval 5 daqiqa kutib, oxirida xato chiqardi):
+
+* `--build-number` butun son ekanligi
+* `--dart-define` `KEY=VALUE` ko'rinishida ekanligi
+* Chiqish papkasiga haqiqatan yozib bo'lishi
+
+Jim-jimgina e'tiborsiz qoladigan bayroqlar uchun ogohlantirish qo'shildi: `--no-copy` bilan `--out`/`--open`, release bo'lmagan rejimda `--obfuscate`, `--arm64` bilan `--split`, `--no-tune` bilan `--aggressive`.
+
 ## 1.3.2 - 2026-08-22
 
 ### 🐞 Bug tuzatishlar

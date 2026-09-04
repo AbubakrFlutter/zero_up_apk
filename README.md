@@ -6,7 +6,7 @@ buyruq qatori vositasi.
 
 - 📊 Jarayon **foizlarda** ko'rinadi — qaysi bosqichda ekani o'zbekcha yoziladi
 - 🚀 Kompyuter quvvatiga (RAM / yadro soni) qarab Gradle **avtomat sozlanadi**
-- 📁 Tayyor APK **ish stoliga (Desktop)** — ilova nomi va versiyasi bilan atalgan yangi papkaga tushadi
+- 📁 Tayyor APK **ish stoliga (Desktop)** — ilova nomi va versiyasi bilan atalgan yangi papkaga tushadi (`zup config` bilan boshqa papkani tanlash mumkin)
 - 🧠 Xatolar **o'zbekcha tushuntiriladi** va yechimi ko'rsatiladi
 - 🔄 **GitHub orqali avtomatik yangilanish** - npm uslubida
 
@@ -21,7 +21,7 @@ buyruq qatori vositasi.
 ### ⚡ npm orqali (eng oddiy)
 
 ```bash
-npm install -g github:zero_up_team/zero_up_apk
+npm install -g zero_up_apk
 ```
 
 Tayyor! Endi istalgan Flutter loyihangizda:
@@ -63,9 +63,35 @@ zup --help           # Yordam
 | `--arm64` | Faqat arm64 — 2-3x tezroq |
 | `--clean` | Avval `flutter clean` |
 | `--obfuscate` | Dart kodini yashirish |
-| `--out C:\papka` | Boshqa papkaga chiqarish |
+| `-o`, `--out C:\papka` | Boshqa papkaga chiqarish (faqat shu safar) |
+| `--save` | Berilgan sozlamalarni doimiy qilib saqlash |
 | `--open` | Tugagach papkani ochish |
-| `-v` | Batafsil log |
+| `-v` | Versiyani ko'rsatish |
+| `-V` | Batafsil log |
+
+---
+
+## 📁 Fayllar qayerga tushadi?
+
+Standart holatda tayyor APK **ish stoliga (Desktop)** tushadi. Buni bir marta
+sozlab qo'ysangiz, keyin har safar `--out` yozib o'tirish shart emas:
+
+```bash
+zup config                    # sozlamalar menyusi (eng oson yo'l)
+zup config --out D:\APK       # papkani darhol o'rnatish
+zup config reset              # ish stoliga qaytarish
+
+zup apk --out D:\APK          # faqat shu safar boshqa papkaga
+zup apk --out D:\APK --save   # shu papkani doimiy qilib saqlash
+```
+
+`zup config` menyusi orqali quyidagilarni sozlash mumkin:
+
+- Fayllar tushadigan papka
+- Yig'ish tugagach papkani avtomatik ochish
+- Doim faqat arm64 yig'ish (eng tez rejim)
+
+Sozlamalar `~/.zup/config.json` faylida saqlanadi.
 
 ---
 
@@ -76,10 +102,10 @@ zup --help           # Yordam
 zup update
 
 # Yoki npm orqali
-npm update -g github:zero_up_team/zero_up_apk
+npm update -g zero_up_apk
 ```
 
-Tool har 24 soatda yangilanish borligini tekshiradi:
+Tool har safar ishga tushganda yangilanish borligini tekshiradi:
 
 ```
 ╭────────────────────────────────────────╮

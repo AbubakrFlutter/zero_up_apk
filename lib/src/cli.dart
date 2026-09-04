@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'build_options.dart';
 import 'build_stats.dart';
 import 'builder.dart';
+import 'config.dart';
 import 'console.dart';
 import 'error_translator.dart';
 import 'gradle_tuner.dart';
@@ -14,7 +15,7 @@ import 'output_manager.dart';
 import 'project_info.dart';
 import 'system_info.dart';
 
-const zeroUpApkVersion = '1.3.1';
+const zeroUpApkVersion = '1.3.3';
 
 /// Buyruq qatori interfeysi — barcha bosqichlarni boshqaradi.
 class ZeroUpApkCli {
@@ -49,6 +50,17 @@ class ZeroUpApkCli {
     }
 
     ui.banner(zeroUpApkVersion);
+
+    // Saqlangan sozlamalar — `--out` va boshqalar uchun standart qiymatlar.
+    final config = ZupConfig.load();
+
+    // `zup config` — sozlamalarni ko'rish/o'zgartirish.
+    // Loyihani aniqlashdan OLDIN tekshiriladi: sozlamani istalgan papkadan
+    // o'zgartirish mumkin bo'lishi kerak.
+    final restWords = results.rest.map((e) => e.toLowerCase()).toList();
+    if (restWords.contains('config') || restWords.contains('sozlama')) {
+      return _configCommand(results, restWords, config);
+    }
 
     // 1) Loyihani aniqlash
     final projectPath = p.normalize(
@@ -86,22 +98,28 @@ class ZeroUpApkCli {
       return 64;
     }
 
+    // Bayroq berilmagan bo'lsa — saqlangan sozlama, u ham bo'lmasa — standart.
+    bool merged(String name, bool? saved, bool fallback) =>
+        results.wasParsed(name) ? results.flag(name) : (saved ?? fallback);
+
+    final mode = switch (results.option('mode')) {
+      'debug' => BuildMode.debug,
+      'profile' => BuildMode.profile,
+      _ => BuildMode.release,
+    };
+
     final options = BuildOptions(
       projectPath: project.root,
       targets: targets,
-      mode: switch (results.option('mode')) {
-        'debug' => BuildMode.debug,
-        'profile' => BuildMode.profile,
-        _ => BuildMode.release,
-      },
+      mode: mode,
       splitPerAbi: results.flag('split'),
-      onlyArm64: results.flag('arm64'),
+      onlyArm64: merged('arm64', config.arm64, false),
       obfuscate: results.flag('obfuscate'),
       clean: results.flag('clean'),
       tune: results.flag('tune'),
       aggressive: results.flag('aggressive'),
-      copyOutput: results.flag('copy'),
-      outputDir: results.option('out'),
+      copyOutput: merged('copy', config.copyOutput, true),
+      outputDir: results.option('out') ?? config.outputDir,
       flavor: results.option('flavor'),
       dartDefines: results.multiOption('dart-define'),
       buildName: results.option('build-name'),
@@ -111,10 +129,224 @@ class ZeroUpApkCli {
       extraArgs: results.multiOption('extra'),
     );
 
-    return _execute(project, options, openFolder: results.flag('open'));
+    final openFolder = merged('open', config.openFolder, false);
+
+    // Bir-biriga zid yoki e'tiborsiz qoladigan bayroqlar haqida ogohlantiramiz —
+    // jim-jimgina e'tiborsiz qoldirish foydalanuvchini chalg'itadi.
+    final problem = _validateOptions(
+      results: results,
+      options: options,
+      openFolder: openFolder,
+    );
+    if (problem != null) return problem;
+
+    // `--save` — shu ishga tushirishdagi sozlamalarni doimiy qilib saqlash.
+    if (results.flag('save')) {
+      final toSave = config.copyWith(
+        outputDir: results.option('out'),
+        openFolder: results.wasParsed('open') ? openFolder : null,
+        arm64: results.wasParsed('arm64') ? options.onlyArm64 : null,
+        copyOutput: results.wasParsed('copy') ? options.copyOutput : null,
+      );
+      final error = toSave.save();
+      if (error != null) {
+        ui.warn('Sozlamalar saqlanmadi: $error');
+      } else {
+        ui.ok('Sozlamalar saqlandi (${ZupConfig.filePath})');
+      }
+    }
+
+    return _execute(project, options, openFolder: openFolder);
   }
 
+  /// `zup` (argumentsiz, allaqachon o'rnatilgan) — asosiy menyu.
+  ///
+  /// Ilgari bu yerda o'zgarmas yo'riqnoma matni chiqardi. Endi foydalanuvchi
+  /// hech narsa yodlamasdan hamma amalni shu menyudan bajara oladi.
+  Future<int> runMainMenu() async {
+    enableUtf8Console();
+    ui = Ui();
+    ui.banner(zeroUpApkVersion);
+
+    final config = ZupConfig.load();
+    final project = ProjectInfo.load(p.normalize(p.absolute('.')));
+
+    _showMenuHeader(project, config);
+
+    // Terminal bo'lmasa (masalan chiqish faylga yo'naltirilgan) — savol
+    // bermaymiz, aks holda dastur javob kutib muzlab qoladi.
+    if (!ui.interactive) {
+      _showQuickHelp(project != null);
+      return 0;
+    }
+
+    final buildable = project != null && project.hasAndroid;
+
+    ui.line('  ${ui.bold("Nima qilamiz?")}');
+    ui.line();
+    if (buildable) {
+      ui.line(
+        '    ${ui.cyan("1")}  APK yig\'ish              '
+        '${ui.grey("(tavsiya etiladi)")}',
+      );
+      ui.line(
+        '    ${ui.cyan("2")}  App Bundle (AAB)         '
+        '${ui.grey("Google Play uchun")}',
+      );
+      ui.line('    ${ui.cyan("3")}  Ikkalasi ham');
+      ui.line(
+        '    ${ui.cyan("4")}  Faqat arm64 APK          '
+        '${ui.grey("eng tez rejim")}',
+      );
+      ui.line();
+    }
+    ui.line(
+      '    ${ui.cyan("5")}  Sozlamalar               '
+      '${ui.grey("fayllar qayerga tushadi")}',
+    );
+    ui.line('    ${ui.cyan("6")}  Yordam');
+    ui.line('    ${ui.cyan("0")}  Chiqish');
+    ui.line();
+
+    final answer = ui.ask(
+      buildable ? 'Tanlang [1]:' : 'Tanlang [0]:',
+      defaultValue: buildable ? '1' : '0',
+    );
+    ui.line();
+
+    switch (answer) {
+      case '1':
+      case '2':
+      case '3':
+      case '4':
+        if (!buildable) return _menuNotBuildable(project);
+        final targets = switch (answer) {
+          '2' => [BuildTarget.aab],
+          '3' => [BuildTarget.apk, BuildTarget.aab],
+          _ => [BuildTarget.apk],
+        };
+        return _buildFromMenu(
+          project,
+          config,
+          targets: targets,
+          forceArm64: answer == '4',
+        );
+      case '5':
+        return _configCommand(
+          _buildParser().parse(const []),
+          const ['config'],
+          config,
+        );
+      case '6':
+        _printUsage(_buildParser());
+        return 0;
+      default:
+        ui.step('Chiqildi.');
+        ui.line();
+        return 0;
+    }
+  }
+
+  void _showMenuHeader(ProjectInfo? project, ZupConfig config) {
+    ui.section('Holat');
+    if (project == null) {
+      ui.kv('Loyiha', 'topilmadi (bu papkada pubspec.yaml yo\'q)');
+    } else {
+      ui.kv('Ilova', project.appName);
+      ui.kv('Versiya', project.fullVersion);
+      if (!project.hasAndroid) {
+        ui.kv('Diqqat', "'android' papkasi yo'q — APK yig'ib bo'lmaydi");
+      }
+    }
+    ui.kv(
+      'Fayllar tushadi',
+      config.outputDir ?? 'Ish stoli (Desktop)',
+    );
+    ui.line();
+  }
+
+  int _menuNotBuildable(ProjectInfo? project) {
+    if (project == null) {
+      ui.error("Bu papkada Flutter loyihasi topilmadi.");
+      ui.detail('Papka: ${p.normalize(p.absolute('.'))}');
+      ui.detail("Flutter loyihangizga kiring va qaytadan urinib ko'ring:");
+      ui.detail(r'  cd C:\mening_loyiham');
+      ui.detail('  zup');
+    } else {
+      ui.error("Loyihada 'android' papkasi yo'q — APK yig'ib bo'lmaydi.");
+    }
+    ui.line();
+    return 66;
+  }
+
+  /// Menyudan tanlangan variantni yig'adi — saqlangan sozlamalar bilan.
+  Future<int> _buildFromMenu(
+    ProjectInfo? project,
+    ZupConfig config, {
+    required List<BuildTarget> targets,
+    required bool forceArm64,
+  }) async {
+    if (project == null) return _menuNotBuildable(project);
+
+    final options = BuildOptions(
+      projectPath: project.root,
+      targets: targets,
+      onlyArm64: forceArm64 || (config.arm64 ?? false),
+      copyOutput: config.copyOutput ?? true,
+      outputDir: config.outputDir,
+    );
+
+    if (options.copyOutput && options.outputDir != null) {
+      final error = validateOutputDir(options.outputDir!);
+      if (error != null) {
+        ui.error("Chiqish papkasiga yozib bo'lmaydi: ${options.outputDir}");
+        ui.detail('Sabab: $error');
+        ui.detail('Boshqa papka tanlang: zup config');
+        return 73;
+      }
+    }
+
+    return _execute(
+      project,
+      options,
+      openFolder: config.openFolder ?? false,
+    );
+  }
+
+  void _showQuickHelp(bool inProject) {
+    ui.line('  ${ui.bold("TEZ BOSHLASH")}');
+    ui.line();
+    ui.line('    ${ui.cyan("zup apk")}          ${ui.grey("APK yig'ish")}');
+    ui.line(
+      '    ${ui.cyan("zup apk --arm64")}  ${ui.grey("eng tez rejim")}',
+    );
+    ui.line('    ${ui.cyan("zup aab")}          ${ui.grey("Google Play uchun")}');
+    ui.line(
+      '    ${ui.cyan("zup config")}       ${ui.grey("fayllar qayerga tushsin")}',
+    );
+    ui.line('    ${ui.cyan("zup --help")}       ${ui.grey("to'liq yordam")}');
+    ui.line();
+    if (!inProject) {
+      ui.detail("Avval Flutter loyihangizga kiring: cd C:\\mening_loyiham");
+      ui.line();
+    }
+  }
+
+  /// Yig'ishni bajaradi va qanday tugashidan qat'i nazar signal obunasini
+  /// yopadi — aks holda jarayon o'chmay qoladi.
   Future<int> _execute(
+    ProjectInfo project,
+    BuildOptions options, {
+    required bool openFolder,
+  }) async {
+    try {
+      return await _runBuild(project, options, openFolder: openFolder);
+    } finally {
+      await _disposeSignalHandler();
+    }
+  }
+
+  Future<int> _runBuild(
     ProjectInfo project,
     BuildOptions options, {
     required bool openFolder,
@@ -464,6 +696,283 @@ class ZeroUpApkCli {
     ui.line();
   }
 
+  /// Bir-biriga zid bayroqlarni tekshiradi.
+  /// `null` — davom etish mumkin, aks holda chiqish kodi.
+  ///
+  /// Muhim: xatolar yig'ish BOSHLANISHIDAN oldin topiladi. Aks holda
+  /// foydalanuvchi 5 daqiqa kutib, oxirida "papkaga yozib bo'lmadi" degan
+  /// xabarni ko'radi.
+  int? _validateOptions({
+    required ArgResults results,
+    required BuildOptions options,
+    required bool openFolder,
+  }) {
+    // 1) build-number butun son bo'lishi shart — aks holda Gradle tushunarsiz
+    // xato beradi.
+    final buildNumber = options.buildNumber;
+    if (buildNumber != null && int.tryParse(buildNumber) == null) {
+      ui.error("--build-number butun son bo'lishi kerak: '$buildNumber'");
+      ui.detail('Masalan: --build-number=12');
+      return 64;
+    }
+
+    // 2) dart-define KEY=VALUE ko'rinishida bo'lishi kerak.
+    for (final define in options.dartDefines) {
+      if (!define.contains('=')) {
+        ui.error("--dart-define KEY=VALUE ko'rinishida bo'lishi kerak: '$define'");
+        ui.detail('Masalan: --dart-define=API_URL=https://api.example.com');
+        return 64;
+      }
+      if (define.startsWith('=')) {
+        ui.error("--dart-define da kalit (KEY) bo'sh: '$define'");
+        return 64;
+      }
+    }
+
+    // 3) Chiqish papkasiga haqiqatan yozib bo'ladimi?
+    if (options.copyOutput && options.outputDir != null) {
+      final error = validateOutputDir(options.outputDir!);
+      if (error != null) {
+        ui.error("Chiqish papkasiga yozib bo'lmaydi: ${options.outputDir}");
+        ui.detail('Sabab: $error');
+        ui.detail("Boshqa papka tanlang: zup config");
+        return 73;
+      }
+    }
+
+    // 4) Jim-jimgina e'tiborsiz qoladigan birikmalar — ogohlantiramiz.
+    if (!options.copyOutput) {
+      if (results.option('out') != null) {
+        ui.warn("--out e'tiborsiz qoldirildi, chunki --no-copy berilgan");
+      }
+      if (openFolder) {
+        ui.warn("--open e'tiborsiz qoldirildi, chunki --no-copy berilgan");
+      }
+    }
+
+    if (options.obfuscate && options.mode != BuildMode.release) {
+      ui.warn(
+        "--obfuscate faqat release rejimida ishlaydi — "
+        "hozir ${options.mode.uzName} rejimi",
+      );
+    }
+
+    if (options.onlyArm64 &&
+        results.wasParsed('split') &&
+        results.flag('split')) {
+      ui.warn("--arm64 berilgani uchun --split e'tiborsiz qoldirildi");
+    }
+
+    if (options.aggressive && !options.tune) {
+      ui.warn("--aggressive ishlamaydi, chunki --no-tune berilgan");
+    }
+
+    return null;
+  }
+
+  /// `zup config` — saqlanadigan sozlamalar.
+  Future<int> _configCommand(
+    ArgResults results,
+    List<String> restWords,
+    ZupConfig config,
+  ) async {
+    // `zup config reset` — hammasini standart holatga qaytarish.
+    if (restWords.contains('reset') || restWords.contains('tozalash')) {
+      final error = ZupConfig.reset();
+      if (error != null) {
+        ui.error('Sozlamalarni tozalab bo\'lmadi: $error');
+        return 73;
+      }
+      ui.ok('Sozlamalar tozalandi — hammasi standart holatga qaytdi.');
+      ui.detail('Fayllar yana ish stoliga (Desktop) tushadi.');
+      ui.line();
+      return 0;
+    }
+
+    // `zup config --out D:\APK` — to'g'ridan-to'g'ri o'rnatish.
+    if (results.option('out') != null) {
+      return _saveOutputDir(results.option('out')!, config);
+    }
+
+    _showConfig(config);
+
+    if (!ui.interactive) return 0;
+
+    ui.line('  ${ui.bold("Nimani o'zgartiramiz?")}');
+    ui.line();
+    ui.line('    ${ui.cyan("1")}  Fayllar tushadigan papka');
+    ui.line('    ${ui.cyan("2")}  Tugagach papkani avtomatik ochish');
+    ui.line('    ${ui.cyan("3")}  Doim faqat arm64 yig\'ish ${ui.grey("(eng tez)")}');
+    ui.line('    ${ui.cyan("4")}  Hammasini standart holatga qaytarish');
+    ui.line('    ${ui.cyan("0")}  Chiqish');
+    ui.line();
+
+    final answer = ui.ask('Tanlang [0]:', defaultValue: '0');
+    ui.line();
+
+    switch (answer) {
+      case '1':
+        return _askOutputDir(config);
+      case '2':
+        final current = config.openFolder ?? false;
+        final updated = config.copyWith(openFolder: !current);
+        final error = updated.save();
+        if (error != null) {
+          ui.error('Saqlanmadi: $error');
+          return 73;
+        }
+        ui.ok(
+          !current
+              ? 'Endi yig\'ish tugagach papka avtomatik ochiladi.'
+              : 'Endi papka avtomatik ochilmaydi.',
+        );
+        ui.line();
+        return 0;
+      case '3':
+        final current = config.arm64 ?? false;
+        final updated = config.copyWith(arm64: !current);
+        final error = updated.save();
+        if (error != null) {
+          ui.error('Saqlanmadi: $error');
+          return 73;
+        }
+        ui.ok(
+          !current
+              ? "Endi doim faqat arm64 uchun yig'iladi (eng tez rejim)."
+              : "Endi barcha protsessorlar uchun yig'iladi.",
+        );
+        ui.detail(
+          !current
+              ? "Bir martalik o'zgartirish: zup apk --no-arm64"
+              : "Bir martalik o'zgartirish: zup apk --arm64",
+        );
+        ui.line();
+        return 0;
+      case '4':
+        final error = ZupConfig.reset();
+        if (error != null) {
+          ui.error('Tozalab bo\'lmadi: $error');
+          return 73;
+        }
+        ui.ok('Sozlamalar tozalandi — hammasi standart holatga qaytdi.');
+        ui.line();
+        return 0;
+      default:
+        ui.step('O\'zgartirilmadi.');
+        ui.line();
+        return 0;
+    }
+  }
+
+  void _showConfig(ZupConfig config) {
+    ui.section('Hozirgi sozlamalar');
+
+    final outLabel = config.outputDir ?? 'Ish stoli (Desktop) — standart';
+    ui.kv('Chiqish papkasi', outLabel);
+    ui.kv(
+      'Papkani ochish',
+      (config.openFolder ?? false) ? 'ha' : "yo'q (standart)",
+    );
+    ui.kv(
+      'Faqat arm64',
+      (config.arm64 ?? false) ? 'ha' : "yo'q (standart)",
+    );
+    ui.kv(
+      'Fayllarni ko\'chirish',
+      (config.copyOutput ?? true) ? 'ha (standart)' : "yo'q",
+    );
+
+    if (ZupConfig.exists) {
+      ui.line();
+      ui.detail('Sozlamalar fayli: ${ZupConfig.filePath}');
+    } else {
+      ui.line();
+      ui.detail('Sozlamalar fayli hali yaratilmagan (hammasi standart).');
+    }
+    ui.line();
+  }
+
+  Future<int> _askOutputDir(ZupConfig config) async {
+    final desktop = await OutputManager.desktopPath();
+
+    ui.line('  ${ui.bold("Fayllar qayerga tushsin?")}');
+    ui.line();
+    ui.line(
+      '    ${ui.cyan("1")}  Ish stoli ${ui.grey("(Desktop — standart)")}',
+    );
+    ui.line("    ${ui.cyan("2")}  Boshqa papka ${ui.grey("(yo'lini yozasiz)")}");
+    ui.line('    ${ui.cyan("0")}  Bekor qilish');
+    ui.line();
+
+    final choice = ui.ask('Tanlang [1]:', defaultValue: '1');
+    ui.line();
+
+    if (choice == '0') {
+      ui.step('Bekor qilindi.');
+      ui.line();
+      return 0;
+    }
+
+    if (choice == '2') {
+      ui.line('  ${ui.grey(r"Masalan: D:\APK  yoki  C:\Users\Ali\Downloads")}');
+      ui.line();
+      final path = ui.ask("Papka yo'li:");
+      ui.line();
+      if (path == null || path.trim().isEmpty) {
+        ui.step('Bekor qilindi.');
+        ui.line();
+        return 0;
+      }
+      return _saveOutputDir(path.trim(), config);
+    }
+
+    // Ish stoli — sozlamadan olib tashlaymiz (standart holatga qaytadi).
+    final updated = config.copyWith(clearOutputDir: true);
+    final error = updated.save();
+    if (error != null) {
+      ui.error('Saqlanmadi: $error');
+      return 73;
+    }
+    ui.ok('Fayllar ish stoliga tushadi${desktop != null ? ": $desktop" : ""}');
+    ui.line();
+    return 0;
+  }
+
+  Future<int> _saveOutputDir(String path, ZupConfig config) async {
+    // Tirnoqlarni olib tashlaymiz — foydalanuvchi "D:\Mening papkam" deb
+    // nusxa ko'chirishi juda ehtimolli.
+    var cleaned = path.trim();
+    if (cleaned.length > 1 &&
+        ((cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+            (cleaned.startsWith("'") && cleaned.endsWith("'")))) {
+      cleaned = cleaned.substring(1, cleaned.length - 1).trim();
+    }
+
+    final error = validateOutputDir(cleaned);
+    if (error != null) {
+      ui.error("Bu papkaga yozib bo'lmaydi: $cleaned");
+      ui.detail('Sabab: $error');
+      ui.line();
+      return 73;
+    }
+
+    final absolute = p.normalize(p.absolute(cleaned));
+    final updated = config.copyWith(outputDir: absolute);
+    final saveError = updated.save();
+    if (saveError != null) {
+      ui.error('Saqlanmadi: $saveError');
+      ui.line();
+      return 73;
+    }
+
+    ui.ok('Saqlandi! Endi fayllar shu yerga tushadi:');
+    ui.detail(absolute);
+    ui.line();
+    ui.detail('Ish stoliga qaytarish: zup config reset');
+    ui.line();
+    return 0;
+  }
+
   Future<int> _restoreGradle(ProjectInfo project) async {
     final system = await SystemInfo.detect();
     final tuner = GradleTuner(project.androidDir, system);
@@ -535,44 +1044,35 @@ class ZeroUpApkCli {
     }
   }
 
+  /// Ctrl+C ni ushlash uchun obuna. Yig'ish tugagach BEKOR QILINISHI SHART.
+  StreamSubscription<ProcessSignal>? _signalSubscription;
+
   void _installSignalHandler() {
     try {
-      ProcessSignal.sigint.watch().listen((_) {
+      _signalSubscription = ProcessSignal.sigint.watch().listen((_) {
         ui.restoreCursor();
         ui.warn("To'xtatilmoqda...");
         _builder?.cancel();
       });
-    } catch (e) {
-      // Windows'da va ba'zi muhitlarda ProcessSignal ishlamaydi.
-      // Shuning uchun stdinni o'qish orqali Ctrl+C boshqaramiz.
-      if (Platform.isWindows) {
-        _installWindowsSignalHandler();
-      }
+    } catch (_) {
+      // Ba'zi muhitlarda signalni kuzatib bo'lmaydi — bunda Ctrl+C
+      // jarayonni odatdagidek to'xtatadi.
+      //
+      // Ilgari bu yerda stdin.readLineSync() bilan zaxira yo'l bor edi,
+      // lekin u Future.microtask ichida ishlagani uchun butun hodisalar
+      // siklini bloklab, dasturni muzlatib qo'yardi. Bundan tashqari
+      // interaktiv menyuning stdin o'qishiga ham xalaqit berardi.
     }
   }
 
-  void _installWindowsSignalHandler() {
-    // Windows'da ProcessSignal.sigint ishlamaydi, shuning uchun
-    // alohida thread'da stdin'ni o'qiyamiz va Ctrl+C ni qarab turamiz.
-    // Agar foydalanuvchi Ctrl+C bilan terminalni to'xtatsa,
-    // stdin ko'cha turib qoladi va exit kod 130 bo'ladi.
-    Future.microtask(() async {
-      try {
-        while (true) {
-          // stdin.readLineSync bu Ctrl+C ni to'g'ri qabul qiladi
-          stdin.readLineSync();
-          // Agar shu yerga yetsa, foydalanuvchi Enter bosdi yoki stdin yopildi
-          if (_builder != null) {
-            ui.restoreCursor();
-            ui.warn("To'xtatilmoqda...");
-            _builder!.cancel();
-          }
-          break;
-        }
-      } catch (_) {
-        // Stdin yopilgan yoki boshqa xato
-      }
-    });
+  /// Signal obunasini yopadi.
+  ///
+  /// Bu bo'lmasa Dart hodisalar sikli ochiq qolib, jarayon yig'ish
+  /// tugagandan keyin ham o'chmasdi: `zup.exe` qulflanib qolar va
+  /// keyingi o'rnatish "Access is denied" xatosi bilan buzilardi.
+  Future<void> _disposeSignalHandler() async {
+    await _signalSubscription?.cancel();
+    _signalSubscription = null;
   }
 
   Future<void> _openFolder(String path) async {
@@ -589,7 +1089,12 @@ class ZeroUpApkCli {
 
   ArgParser _buildParser() => ArgParser()
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Yordam.')
-    ..addFlag('version', negatable: false, help: 'Versiyani ko\'rsatish.')
+    ..addFlag(
+      'version',
+      abbr: 'v',
+      negatable: false,
+      help: 'Versiyani ko\'rsatish.',
+    )
     ..addOption(
       'path',
       abbr: 'p',
@@ -631,14 +1136,23 @@ class ZeroUpApkCli {
       help: 'Natijani ish stoliga (Desktop) ko\'chirish.',
     )
     ..addFlag('open', defaultsTo: false, help: 'Tugagach papkani ochish.')
-    ..addOption('out', help: "Boshqa chiqish papkasi yo'li.")
+    ..addOption(
+      'out',
+      abbr: 'o',
+      help: "Chiqish papkasi (doimiy qilish uchun: zup config).",
+    )
+    ..addFlag(
+      'save',
+      negatable: false,
+      help: 'Berilgan sozlamalarni doimiy qilib saqlash.',
+    )
     ..addOption('flavor', help: 'Flavor nomi.')
     ..addMultiOption('dart-define', help: 'KEY=VALUE ko\'rinishida (bir necha marta ishlatish mumkin). Misol: --dart-define=API_URL=https://api.example.com --dart-define=ENV=production')
     ..addOption('build-name', help: 'Versiya nomini almashtirish.')
     ..addOption('build-number', help: 'Build raqamini almashtirish.')
     ..addFlag(
       'verbose',
-      abbr: 'v',
+      abbr: 'V',
       defaultsTo: false,
       help: "To'liq logni ko'rsatish.",
     )
@@ -684,11 +1198,38 @@ class ZeroUpApkCli {
     );
     ui.line(
       '    ${ui.cyan("zup apk --dart-define=API_URL=https://api.example.com")} '
-      '${ui.grey("Dart define parametrlar bilan yig\'ish")}',
+      "${ui.grey("Dart define parametrlar bilan yig'ish")}",
     );
     ui.line(
       '    ${ui.cyan("zup --restore-gradle")}    '
       '${ui.grey("gradle sozlamalarini qaytarish")}',
+    );
+    ui.line();
+    ui.line('  ${ui.bold("FAYLLAR QAYERGA TUSHADI?")}');
+    ui.line();
+    ui.line(
+      '    ${ui.grey("Standart holatda — ish stoliga (Desktop). O'zgartirish:")}',
+    );
+    ui.line();
+    ui.line(
+      '    ${ui.cyan("zup config")}              '
+      '${ui.grey("sozlamalar menyusi (eng oson yo'l)")}',
+    );
+    ui.line(
+      '    ${ui.cyan(r"zup config --out D:\APK")} '
+      '${ui.grey("papkani darhol o'rnatish")}',
+    );
+    ui.line(
+      '    ${ui.cyan("zup config reset")}        '
+      '${ui.grey("ish stoliga qaytarish")}',
+    );
+    ui.line(
+      '    ${ui.cyan(r"zup apk --out D:\APK")}    '
+      '${ui.grey("faqat shu safar boshqa papkaga")}',
+    );
+    ui.line(
+      '    ${ui.cyan(r"zup apk --out D:\APK --save")} '
+      '${ui.grey("shu papkani doimiy qilib saqlash")}',
     );
     ui.line();
     ui.line('  ${ui.bold("SOZLAMALAR")}');
