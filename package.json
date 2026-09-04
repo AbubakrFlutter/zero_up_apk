@@ -23,8 +23,8 @@
     "url": "https://github.com/AbubakrFlutter/zero_up_apk/issues"
   },
   "bin": {
-    "zup": "./bin/zup.js",
-    "zero_up_apk": "./bin/zup.js"
+    "zup": "bin/zup.js",
+    "zero_up_apk": "bin/zup.js"
   },
   "files": [
     "bin/zup.js",
