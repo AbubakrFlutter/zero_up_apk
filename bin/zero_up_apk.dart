@@ -443,6 +443,22 @@ Future<int> _autoInstall() async {
   final installDir = Directory('$homeDir\\.zup');
   final targetExe = File('${installDir.path}\\zup.exe');
 
+  // `dart run bin/zero_up_apk.dart` bilan ishga tushirilganda
+  // Platform.resolvedExecutable Dart SDK ning dart.exe sini qaytaradi.
+  // Uni zup.exe deb ko'chirsak, o'rnatilgan "zup" umuman ishlamaydi
+  // ("Unable to find snapshot: dartdev_aot.dart.snapshot").
+  final exeName = exePath.split(RegExp(r'[\\/]')).last.toLowerCase();
+  if (exeName == 'dart.exe' || exeName == 'dart') {
+    print('');
+    print('⚠️  Bu buyruq manba koddan (dart run) ishga tushirilgan —');
+    print('   o\'rnatish uchun avval kompilyatsiya qilish kerak:');
+    print('');
+    print('   dart compile exe bin/zero_up_apk.dart -o bin/zup.exe');
+    print('   bin\\zup.exe');
+    print('');
+    return 1;
+  }
+
   print('');
   print('╔══════════════════════════════════════════════════════════════╗');
   print('║                    ⚡ Zero Up APK                           ║');
