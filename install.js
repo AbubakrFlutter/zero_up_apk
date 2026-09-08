@@ -1,168 +1,95 @@
 #!/usr/bin/env node
+'use strict';
+
+/**
+ * zero_up_apk o'rnatuvchisi.
+ *
+ * MUHIM: bu yerda tayyor .exe yuklab OLINMAYDI. Buning o'rniga zup
+ * foydalanuvchining o'z kompyuterida kompilyatsiya qilinadi.
+ *
+ * Sabab: Windows 11 dagi Smart App Control internetdan kelgan imzolanmagan
+ * .exe fayllarni ishga tushirishni taqiqlaydi ("spawn UNKNOWN" yoki
+ * "An Application Control policy has blocked this file"). Mahalliy
+ * kompilyatsiya qilingan fayl esa bloklanmaydi.
+ *
+ * Bu ishlaydi, chunki zup faqat Flutter loyihalari uchun kerak, Flutter esa
+ * Dart SDK ni o'zi bilan olib keladi — ya'ni har bir foydalanuvchida Dart bor.
+ */
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
-const https = require('https');
-const { execSync } = require('child_process');
 
-const VERSION = '1.3.3';
-const REPO_OWNER = 'AbubakrFlutter';
-const REPO_NAME = 'zero_up_apk';
+const { findDart, buildBinary, zupDir, targetPath } = require('./zup-build.js');
 
-// Platform aniqlash
-const platform = os.platform();
-const arch = os.arch();
+const VERSION = require('./package.json').version;
 
-console.log('');
-console.log('╔══════════════════════════════════════════════════════════════╗');
-console.log('║                    ⚡ Zero Up APK                           ║');
-console.log('╚══════════════════════════════════════════════════════════════╝');
-console.log('');
-console.log('📦 O\'rnatilmoqda...');
-console.log('');
+main();
 
-// Home directory
-const homeDir = os.homedir();
-const zupDir = path.join(homeDir, '.zup');
+function main() {
+  banner();
 
-// Papkani yaratish
-if (!fs.existsSync(zupDir)) {
-  fs.mkdirSync(zupDir, { recursive: true });
-  console.log('✅ Papka yaratildi:', zupDir);
-}
-
-// Platform bo'yicha binary nomi
-let binaryName;
-let downloadUrl;
-
-if (platform === 'win32') {
-  binaryName = 'zup.exe';
-  downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/zup_windows_x64.exe`;
-} else if (platform === 'darwin') {
-  binaryName = 'zup';
-  downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/zup_macos_${arch}`;
-} else if (platform === 'linux') {
-  binaryName = 'zup';
-  downloadUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/zup_linux_${arch}`;
-} else {
-  console.error('❌ Platform qo\'llab-quvvatlanmaydi:', platform);
-  process.exit(1);
-}
-
-// Local binary nomi (package.json da "bin" maydonida ko'rsatilgan)
-let localBinaryName;
-if (platform === 'win32') {
-  localBinaryName = 'zup_windows_x64.exe';
-} else if (platform === 'darwin') {
-  localBinaryName = 'zup_macos_' + arch;
-} else if (platform === 'linux') {
-  localBinaryName = 'zup_linux_' + arch;
-}
-
-const targetPath = path.join(zupDir, binaryName);
-
-// Binary mavjudligini tekshirish
-const localBinary = path.join(__dirname, 'bin', localBinaryName);
-if (fs.existsSync(localBinary)) {
-  // Local binary mavjud - ko'chirish
-  console.log('📁 Binary ko\'chirilmoqda...');
-  fs.copyFileSync(localBinary, targetPath);
-
-  // Unix platformalarda executable qilish
-  if (platform !== 'win32') {
-    fs.chmodSync(targetPath, '755');
+  const dart = findDart();
+  if (!dart) {
+    warnNoDart();
+    // npm install ni yiqitmaymiz: Flutter keyinroq o'rnatilsa, `zup`
+    // ishga tushganda binary ni o'zi yasab oladi (bin/zup.js).
+    process.exit(0);
   }
 
-  console.log('✅ zup o\'rnatildi:', targetPath);
-} else {
-  // GitHub dan yuklab olish
-  console.log('📥 GitHub dan yuklab olinmoqda...');
-  console.log('   URL:', downloadUrl);
+  console.log('🔨 zup kompyuteringizda yasalmoqda...');
+  console.log(`   Dart: ${dart}`);
+  console.log('');
 
-  downloadFile(downloadUrl, targetPath, () => {
-    // Unix platformalarda executable qilish
-    if (platform !== 'win32') {
-      fs.chmodSync(targetPath, '755');
-    }
-
-    console.log('✅ zup o\'rnatildi:', targetPath);
+  if (!buildBinary(dart, { log: console.log })) {
     console.log('');
-    showInstructions();
-  });
-  return; // Async uchun
-}
+    console.log("⚠️  Hozir yasab bo'lmadi.");
+    console.log('   Muammo emas — birinchi marta "zup" yozganingizda');
+    console.log('   qayta urinib ko\'riladi.');
+    console.log('');
+    process.exit(0);
+  }
 
-// VERSION faylini yaratish
-const versionFile = path.join(zupDir, 'VERSION');
-fs.writeFileSync(versionFile, VERSION);
+  try {
+    fs.mkdirSync(zupDir, { recursive: true });
+    fs.writeFileSync(path.join(zupDir, 'VERSION'), VERSION);
+  } catch (_) {}
 
-console.log('');
-showInstructions();
-
-function showInstructions() {
+  console.log('');
   console.log('╔══════════════════════════════════════════════════════════════╗');
-  console.log('║              ✅ O\'RNATISH MUVAFFAQIYATLI!                   ║');
+  console.log("║              ✅ O'RNATISH MUVAFFAQIYATLI!                   ║");
   console.log('╚══════════════════════════════════════════════════════════════╝');
   console.log('');
   console.log('📌 ISHLATISH:');
   console.log('');
+  console.log('   zup                     # menyu');
   console.log('   zup apk --arm64         # APK yasash');
-  console.log('   zup aab                 # App Bundle yasash');
-  console.log('   zup update              # Yangilash');
-  console.log('   zup --help              # Yordam');
+  console.log('   zup aab                 # App Bundle (Google Play)');
+  console.log('   zup config              # fayllar qayerga tushsin');
+  console.log('   zup update              # yangilash');
   console.log('');
-  console.log('🚀 Flutter loyihangizga kiring va \'zup apk\' yozing!');
+  console.log("🚀 Flutter loyihangizga kiring va 'zup' yozing!");
   console.log('');
 }
 
-function downloadFile(url, dest, callback) {
-  const file = fs.createWriteStream(dest);
-
-  https.get(url, (response) => {
-    if (response.statusCode === 302 || response.statusCode === 301) {
-      // Redirect
-      return downloadFile(response.headers.location, dest, callback);
-    }
-
-    if (response.statusCode !== 200) {
-      console.error('❌ Yuklab olishda xato. Status:', response.statusCode);
-      console.log('');
-      console.log('⚠️  GitHub Releases dan qo\'lda yuklab oling:');
-      console.log('   https://github.com/' + REPO_OWNER + '/' + REPO_NAME + '/releases');
-      console.log('');
-      process.exit(1);
-    }
-
-    const totalSize = parseInt(response.headers['content-length'], 10);
-    let downloadedSize = 0;
-    let lastPercent = 0;
-
-    response.on('data', (chunk) => {
-      downloadedSize += chunk.length;
-      const percent = Math.floor((downloadedSize / totalSize) * 100);
-
-      if (percent !== lastPercent && percent % 10 === 0) {
-        process.stdout.write(`   ${percent}% yuklab olindi...\r`);
-        lastPercent = percent;
-      }
-    });
-
-    response.pipe(file);
-
-    file.on('finish', () => {
-      file.close(() => {
-        console.log('   100% yuklab olindi!   ');
-        callback();
-      });
-    });
-  }).on('error', (err) => {
-    fs.unlinkSync(dest);
-    console.error('❌ Yuklab olishda xato:', err.message);
-    console.log('');
-    console.log('⚠️  GitHub Releases dan qo\'lda yuklab oling:');
-    console.log('   https://github.com/' + REPO_OWNER + '/' + REPO_NAME + '/releases');
-    console.log('');
-    process.exit(1);
-  });
+function warnNoDart() {
+  console.log('⚠️  Dart SDK topilmadi.');
+  console.log('');
+  console.log("   zup Flutter loyihalarini yig'adi, ya'ni sizda Flutter");
+  console.log('   bo\'lishi kerak. Dart Flutter bilan birga keladi —');
+  console.log('   alohida o\'rnatish shart emas.');
+  console.log('');
+  console.log('   O\'rnatish: https://docs.flutter.dev/get-started/install');
+  console.log('');
+  console.log('   Flutter o\'rnatgach shunchaki "zup" yozing —');
+  console.log('   qolganini o\'zi qiladi.');
+  console.log('');
 }
+
+function banner() {
+  console.log('');
+  console.log('╔══════════════════════════════════════════════════════════════╗');
+  console.log('║                    ⚡ Zero Up APK                           ║');
+  console.log('╚══════════════════════════════════════════════════════════════╝');
+  console.log('');
+}
+

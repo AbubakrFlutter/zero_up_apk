@@ -1,3 +1,60 @@
+## 1.4.0 - 2026-09-08
+
+### 🛠 Endi tayyor .exe yuklab olinmaydi — u sizning kompyuteringizda yasaladi
+
+Windows 11 dagi **Smart App Control** internetdan kelgan imzolanmagan `.exe`
+fayllarni ishga tushirishga ruxsat bermaydi. Natijada `zup` deyilganda
+tushunarsiz xato chiqardi:
+
+```
+Error: spawn UNKNOWN    errno: -4094
+```
+
+Endi npm paketida `.exe` umuman yo'q — zup o'rnatish paytida foydalanuvchining
+o'z Dart SDK si bilan kompilyatsiya qilinadi. Bu ishlaydi, chunki zup faqat
+Flutter loyihalari uchun kerak, Flutter esa Dart ni o'zi bilan olib keladi.
+
+**Ikki bosqichli himoya.** Agar Windows kompilyatsiya qilingan faylni ham
+bloklasa, zup buni sezadi va avtomatik ravishda manba koddan ishga tushadi
+(Dart VM bloklanmaydi). Foydalanuvchi hech narsa qilishi shart emas —
+faqat boshlanishi ~3 soniya sekinroq bo'ladi.
+
+Qo'shimcha yutuqlar:
+
+* npm paketi **3.4 MB → 45 KB** (76 barobar kichik)
+* macOS va Linux ham ishlaydi — avval ular uchun tayyor fayl umuman yo'q edi
+* Sertifikat sotib olish shart emas
+
+### 🔄 `zup update` endi npm orqali
+
+Avval yangilanish GitHub Releases dan olinardi. Endi manba — **npm registry**,
+ya'ni odamlar zup ni qayerdan o'rnatsa, o'sha yer. `npm publish` qilingan
+zahoti versiya o'zi yangilanadi.
+
+Foydalanuvchi faqat `zup update` yozadi — qolganini zup o'zi qiladi:
+npm dan versiyani tekshiradi, yangisi bo'lsa o'rnatadi va yangi binary yasaydi.
+
+Yangilashni Node qismi bajaradi, Dart binary si emas — chunki Windows ishlab
+turgan `.exe` ni almashtirishga ruxsat bermaydi.
+
+### 🐞 Tuzatishlar
+
+* **npm postinstall bloklansa ham ishlaydi.** npm 11 xavfsizlik sababli
+  o'rnatish skriptlarini bloklashi mumkin. Bunday holatda zup birinchi ishga
+  tushganda o'zini o'zi tayyorlaydi.
+* **`dart run` yo'lida joriy papka noto'g'ri edi** — zup foydalanuvchi
+  loyihasi o'rniga npm paketini "loyiha" deb qabul qilardi.
+* **`spawn` xatosi ushlanmasdi** — Windows bloklaganda `spawn()` `error`
+  hodisasini kutmasdan darhol istisno tashlaydi, shuning uchun `try/catch`
+  ham qo'shildi.
+
+### 🧹 Soddalashtirish
+
+O'rnatish va yangilash mantiqi Node tomoniga o'tgani uchun Dart kodidan ~400
+qator olib tashlandi: PATH ni registry orqali sozlash, o'zini nusxalash,
+GitHub Releases dan yuklab olish. Bu bilan birga o'sha kodga tegishli
+xatolar sinfi ham yo'qoldi.
+
 ## 1.3.3 - 2026-09-04
 
 ### ✨ Yangi imkoniyatlar

@@ -31,17 +31,11 @@ cd C:\mening_loyiham
 zup apk --arm64
 ```
 
----
+Birinchi ishga tushirishda zup o'zini kompyuteringizda tayyorlaydi
+(~15 soniya, bir marta). Undan keyin darhol ishlaydi.
 
-### 📦 Yoki .exe yuklab olish
-
-1. **[Releases](../../releases) dan `zup.exe` ni yuklab oling**
-2. **Ikki marta bosib oching** 🖱️ yoki `zup.exe --install`
-3. **Yangi terminal oching**
-4. **Flutter loyihangizga kiring va ishlatish:**
-   ```powershell
-   zup apk --arm64
-   ```
+**Talab:** Flutter o'rnatilgan bo'lishi. Boshqa hech narsa kerak emas —
+Dart Flutter bilan birga keladi.
 
 ---
 
@@ -98,22 +92,21 @@ Sozlamalar `~/.zup/config.json` faylida saqlanadi.
 ## Yangilanish
 
 ```bash
-# Avtomatik yangilanish (tavsiya)
 zup update
-
-# Yoki npm orqali
-npm update -g zero_up_apk
 ```
 
-Tool har safar ishga tushganda yangilanish borligini tekshiradi:
+Boshqa hech narsa yozish kerak emas — zup npm dan yangi versiya bor-yo'qligini
+tekshiradi, bo'lsa o'rnatadi va o'zini qayta tayyorlaydi.
+
+Tool har safar ishga tushganda ham tekshirib turadi:
 
 ```
-╭────────────────────────────────────────╮
-│  💡 Yangi versiya mavjud!             │
-│     Hozirgi: 1.2.0 → Yangi: 1.3.0    │
-│                                       │
-│     Yangilash: zup update            │
-╰────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────╮
+│  💡 Yangi versiya mavjud!                              │
+│     Hozirgi: 1.4.0 → Yangi: 1.5.0                      │
+│                                                        │
+│     Yangilash: zup update                              │
+╰────────────────────────────────────────────────────────╯
 ```
 
 ---
@@ -132,9 +125,26 @@ Tool har safar ishga tushganda yangilanish borligini tekshiradi:
 
 ## Talablar
 
-- Flutter SDK (PATH da)
+- Flutter SDK (PATH da) — Dart u bilan birga keladi
 - Android SDK + JDK
 - Node.js 14+ (npm uchun)
+
+Alohida Dart SDK o'rnatish shart emas.
+
+---
+
+## Qanday ishlaydi?
+
+npm paketida tayyor `.exe` yo'q — zup sizning kompyuteringizda, sizning
+Dart SDK ingiz bilan yasaladi.
+
+Sabab: Windows 11 dagi **Smart App Control** internetdan kelgan imzolanmagan
+`.exe` fayllarni ishga tushirishga ruxsat bermaydi. Mahalliy yasalgan fayl
+esa bu muammoga duch kelmaydi.
+
+Agar Windows baribir bloklasa, zup buni o'zi sezadi va manba koddan ishga
+tushadi — hech narsa qilishingiz shart emas, faqat boshlanishi bir necha
+soniya sekinroq bo'ladi.
 
 ---
 
