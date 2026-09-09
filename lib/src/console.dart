@@ -2,10 +2,11 @@ import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:ffi/ffi.dart';
 
-/// Windows konsolida UTF-8 ni yoqadi (kirill/lotin belgilari va progress bar
-/// belgilari to'g'ri ko'rinishi uchun). Boshqa OS larda hech narsa qilmaydi.
+import 'output_mode.dart';
+
+/// Windows konsolida UTF-8 ni yoqadi (o'zbekcha harflar va chizma belgilar
+/// to'g'ri ko'rinishi uchun). Boshqa OS larda hech narsa qilmaydi.
 void enableUtf8Console() {
   if (!Platform.isWindows) return;
   try {
@@ -16,92 +17,7 @@ void enableUtf8Console() {
         );
     setConsoleOutputCp(65001);
   } catch (_) {
-    // Muhim emas — belgilar oddiy ASCII ga tushib qoladi.
-  }
-}
-
-// Windows konsol rejimi bilan ishlash uchun kerakli doimiylar.
-const _stdInputHandle = -10;
-const _enableVirtualTerminalInput = 0x0200;
-
-/// O'zgartirishdan oldingi konsol rejimi — tiklash uchun saqlanadi.
-int? _savedInputMode;
-
-/// Windows konsolida strelka tugmalarini ANSI ketma-ketligi sifatida
-/// qabul qilishni yoqadi.
-///
-/// NEGA KERAK: Windows konsoli strelka tugmalarini oddiy bayt sifatida
-/// YUBORMAYDI — ular "kalit hodisasi" bo'lib, `stdin` dan o'qiganda umuman
-/// ko'rinmaydi. `ENABLE_VIRTUAL_TERMINAL_INPUT` yoqilsa, konsol ularni
-/// `ESC [ A` / `ESC [ B` ko'rinishida uzatadi. Dart ning
-/// `stdin.lineMode = false` bu rejimni yoqmaydi.
-///
-/// Muvaffaqiyatli bo'lsa `true`. Linux/macOS da terminallar bu ketma-ketlikni
-/// o'zi yuboradi, shuning uchun darhol `true`.
-bool enableArrowKeyInput() {
-  if (!Platform.isWindows) return true;
-
-  try {
-    final kernel32 = DynamicLibrary.open('kernel32.dll');
-
-    final getStdHandle = kernel32
-        .lookupFunction<IntPtr Function(Uint32), int Function(int)>(
-          'GetStdHandle',
-        );
-    final getConsoleMode = kernel32.lookupFunction<
-        Int32 Function(IntPtr, Pointer<Uint32>),
-        int Function(int, Pointer<Uint32>)>('GetConsoleMode');
-    final setConsoleMode = kernel32
-        .lookupFunction<Int32 Function(IntPtr, Uint32), int Function(int, int)>(
-          'SetConsoleMode',
-        );
-
-    final handle = getStdHandle(_stdInputHandle);
-    if (handle == 0 || handle == -1) return false;
-
-    final modePtr = calloc<Uint32>();
-    try {
-      if (getConsoleMode(handle, modePtr) == 0) return false;
-
-      final current = modePtr.value;
-      _savedInputMode ??= current;
-
-      final wanted = current | _enableVirtualTerminalInput;
-      if (wanted == current) return true; // allaqachon yoqilgan
-
-      return setConsoleMode(handle, wanted) != 0;
-    } finally {
-      calloc.free(modePtr);
-    }
-  } catch (_) {
-    return false;
-  }
-}
-
-/// Konsol rejimini asl holiga qaytaradi.
-void restoreArrowKeyInput() {
-  if (!Platform.isWindows) return;
-  final saved = _savedInputMode;
-  if (saved == null) return;
-
-  try {
-    final kernel32 = DynamicLibrary.open('kernel32.dll');
-    final getStdHandle = kernel32
-        .lookupFunction<IntPtr Function(Uint32), int Function(int)>(
-          'GetStdHandle',
-        );
-    final setConsoleMode = kernel32
-        .lookupFunction<Int32 Function(IntPtr, Uint32), int Function(int, int)>(
-          'SetConsoleMode',
-        );
-
-    final handle = getStdHandle(_stdInputHandle);
-    if (handle == 0 || handle == -1) return;
-    setConsoleMode(handle, saved);
-  } catch (_) {
-    // Tiklab bo'lmasa ham dastur ishdan chiqmasligi kerak.
-  } finally {
-    _savedInputMode = null;
+    // Muhim emas — belgilar ASCII ga tushib qoladi.
   }
 }
 
@@ -119,289 +35,441 @@ class _C {
   static const grey = '\x1B[38;5;245m';
 }
 
-/// Konsolga chiqarish uchun yagona nuqta: ranglar, progress bar, xabarlar.
+/// ─────────────────────────  VIZUAL TIZIM  ─────────────────────────
+///
+/// Chekinish FAQAT ikki daraja:
+///   2 — asosiy qatorlar (bosqich, ogohlantirish, xato, sarlavha)
+///   5 — tafsilot (bosqich ostidagi izoh, harakat taklifi)
+///
+/// Ilgari 2, 4, 5, 6 va quti ichi — beshta har xil daraja ishlatilardi.
+const int indentMain = 2;
+const int indentDetail = 5;
+
+/// "kalit: qiymat" jadvallarida kalit ustuni kengligi — HAMMA JOYDA bir xil.
+/// Ilgari uch xil edi: `kv`=22, xulosa=12, MALUMOT.txt=16.
+const int keyColumnWidth = 20;
+
+/// Konsolga chiqarish uchun yagona nuqta.
+///
+/// Rang, belgi va kenglik haqidagi qarorlarni O'ZI QABUL QILMAYDI —
+/// ularni [OutputDecision] dan oladi. Ilgari bu qaror shu klass ichida
+/// tarqoq edi (`_color`, `interactive`) va Node bilan kelishmasdi.
 class Ui {
-  Ui({this.ascii = false});
+  Ui(this.out, {IOSink? sink})
+      : _sink = sink ?? stdout;
 
-  /// Unicode o'rniga faqat ASCII belgilardan foydalanish.
-  final bool ascii;
-
-  bool get _color {
+  /// Sinov uchun: qaror va oqimni ko'rsatmasdan.
+  factory Ui.simple({bool ascii = false}) {
+    bool hasTerminal;
+    bool ansi;
     try {
-      return stdout.hasTerminal && stdout.supportsAnsiEscapes;
+      hasTerminal = stdout.hasTerminal;
+      ansi = hasTerminal && stdout.supportsAnsiEscapes;
     } catch (_) {
-      return false;
+      hasTerminal = false;
+      ansi = false;
     }
+    return Ui(decideOutput(
+      ascii: ascii,
+      env: Platform.environment,
+      stdoutHasTerminal: hasTerminal,
+      stdoutAnsi: ansi,
+      stdoutColumns: hasTerminal ? stdout.terminalColumns : null,
+    ));
   }
 
-  bool get interactive {
-    try {
-      return stdout.hasTerminal;
-    } catch (_) {
-      return false;
-    }
-  }
+  final OutputDecision out;
 
-  String _w(String code, String text) => _color ? '$code$text${_C.reset}' : text;
+  /// Chiqish oqimi. JSON rejimida `stderr` ga o'rnatiladi — stdout'da
+  /// faqat bitta JSON obyekt qolishi uchun.
+  final IOSink _sink;
 
-  String bold(String t) => _w(_C.bold, t);
-  String dim(String t) => _w(_C.dim, t);
-  String red(String t) => _w(_C.red, t);
-  String green(String t) => _w(_C.green, t);
-  String yellow(String t) => _w(_C.yellow, t);
-  String blue(String t) => _w(_C.blue, t);
-  String cyan(String t) => _w(_C.cyan, t);
-  String magenta(String t) => _w(_C.magenta, t);
-  String grey(String t) => _w(_C.grey, t);
+  bool get ascii => !out.unicode;
+  bool get _color => out.color;
 
-  String get _tick => ascii ? '[OK]' : '✔';
-  String get _cross => ascii ? '[X]' : '✖';
-  String get _warnSign => ascii ? '[!]' : '▲';
-  String get _infoSign => ascii ? '[i]' : '•';
-  String get _arrow => ascii ? '->' : '›';
+  /// Terminal kengligi — chizishda hamma joyda shundan foydalaniladi.
+  int get columns => out.columns;
+
+  // ─────────────────────────  RANGLAR  ─────────────────────────
+
+
+  String bold(String t) => _color ? '${_C.bold}$t${_C.reset}' : t;
+  String dim(String t) => _color ? '${_C.dim}$t${_C.reset}' : t;
+  String red(String t) => _color ? '${_C.red}$t${_C.reset}' : t;
+  String green(String t) => _color ? '${_C.green}$t${_C.reset}' : t;
+  String yellow(String t) => _color ? '${_C.yellow}$t${_C.reset}' : t;
+  String blue(String t) => _color ? '${_C.blue}$t${_C.reset}' : t;
+  String cyan(String t) => _color ? '${_C.cyan}$t${_C.reset}' : t;
+  String magenta(String t) => _color ? '${_C.magenta}$t${_C.reset}' : t;
+  String grey(String t) => _color ? '${_C.grey}$t${_C.reset}' : t;
+
+  // ─────────────────────────  BELGILAR  ─────────────────────────
+  //
+  // HAR BIRI `--ascii` da almashadi. Ilgari `•`, `→`, `…`, `💡`, `—`
+  // qattiq kodlangan edi va `--ascii` ni buzardi.
+
+  String get sDone => ascii ? '[OK]' : '✔';
+  String get sActive => ascii ? '>' : '▶';
+  String get sPending => ascii ? '-' : '·';
+  String get sWarn => ascii ? '[!]' : '▲';
+  String get sError => ascii ? '[X]' : '✖';
+  String get sAction => ascii ? '->' : '→';
+  String get sBullet => ascii ? '*' : '·';
+  String get sEllipsis => ascii ? '...' : '…';
+  String get sSeparator => ascii ? '|' : '·';
+
+  // ─────────────────────────  ASOSIY CHIQISH  ─────────────────────────
 
   bool _barActive = false;
 
-  void _raw(String s) => stdout.write(s);
+  void _raw(String s) => _sink.write(s);
 
-  void _clearLine() {
-    if (_barActive) {
-      _raw(_color ? '\x1B[2K\r' : '\r${' ' * 100}\r');
-      _barActive = false;
-    }
-  }
-
-  /// Kursorni yashirish — menyu chizilayotganda miltillab turmasligi uchun.
-  void hideCursor() {
-    if (_color) _raw('\x1B[?25l');
-  }
-
-  /// Kursorni qaytarish. Menyu tugagach CHAQIRILISHI SHART.
-  void showCursor() {
-    if (_color) _raw('\x1B[?25h');
-  }
-
-  /// Kursorni [lines] qator yuqoriga ko'chiradi (menyuni qayta chizish uchun).
-  void moveCursorUp(int lines) {
-    if (lines <= 0) return;
-    if (_color) _raw('\x1B[${lines}A');
-  }
-
-  /// Joriy qatorni tozalaydi — eski, uzunroq matn qolib ketmasligi uchun.
-  void clearLine() {
-    if (_color) _raw('\x1B[2K');
-  }
-
-  /// Terminalga kursorni qaytarish (dastur tugaganda yoki to'xtatilganda)
-  void restoreCursor() {
-    _clearLine();
-    // Kursorni ko'rsatish
+  /// Jonli progress qatorini tozalaydi (agar chizilgan bo'lsa).
+  void _clearBar() {
+    if (!_barActive) return;
     if (_color) {
-      _raw('\x1B[?25h');
+      _raw('\x1B[2K\r');
+    } else {
+      // Rangsiz terminalda ham qator kengligidan oshmaydigan tozalash.
+      // Ilgari bu 100 ta bo'shliq edi va tor terminalda o'ralib ketardi.
+      _raw('\r${' ' * math.min(columns, 200)}\r');
     }
-    // Yangi qator qo'shish - terminal prompt uchun
-    stdout.writeln();
+    _barActive = false;
   }
 
   void line([String text = '']) {
-    _clearLine();
-    stdout.writeln(text);
+    _clearBar();
+    _sink.writeln(text);
   }
 
-  void banner(String version) {
-    final bar = ascii ? '=' * 58 : '─' * 58;
+  /// Kursorni ko'rsatadi va progress qatorini tozalaydi.
+  ///
+  /// Ilgari bu har doim bo'sh qator ham qo'shardi — natijada har bir
+  /// ishga tushirish ikkita bo'sh qator bilan tugardi.
+  void restoreCursor() {
+    _clearBar();
+    if (_color) _raw('\x1B[?25h');
+  }
+
+  // ─────────────────────────  BLOKLAR  ─────────────────────────
+
+  String get _indent => ' ' * indentMain;
+  String get _indentDetail => ' ' * indentDetail;
+
+  /// Dastur sarlavhasi — bir marta, boshida.
+  void header(String version, {String? subtitle}) {
+    final width = math.min(columns - indentMain * 2, 58);
+    final rule = (ascii ? '=' : '─') * math.max(width, 20);
+
     line();
-    line('  ${cyan(bar)}');
+    line('$_indent${cyan(rule)}');
     line(
-      '  ${bold(magenta(ascii ? "ZERO UP APK" : "⚡ ZERO UP APK"))}  '
-      '${grey("v$version")}',
+      '$_indent${bold(magenta(ascii ? "ZERO UP APK" : "⚡ ZERO UP APK"))}'
+      '  ${grey("v$version")}',
     );
-    line('  ${grey("Flutter APK / App Bundle tezkor yig'uvchi")}');
-    line('  ${cyan(bar)}');
-    line();
+    if (subtitle != null) line('$_indent${grey(subtitle)}');
+    line('$_indent${cyan(rule)}');
+    // Yakunlovchi bo'sh qator QO'SHILMAYDI — keyingi blok o'zi qo'shadi.
+    // Ilgari ikkalasi ham qo'shib, ikkita bo'sh qator chiqardi.
   }
 
+  /// Bo'lim sarlavhasi.
   void section(String title) {
     line();
-    line('  ${bold(blue("$_arrow $title"))}');
+    line('$_indent${bold(title.toUpperCase())}');
+    line();
   }
 
-  void step(String text) => line('    ${grey(_infoSign)} $text');
-  void ok(String text) => line('    ${green(_tick)} $text');
-  void warn(String text) => line('    ${yellow(_warnSign)} $text');
-  void error(String text) => line('    ${red(_cross)} $text');
-  void detail(String text) => line('      ${grey(text)}');
+  /// Tugagan bosqich.
+  void done(String text, {String? hint}) => _step(green(sDone), text, hint);
 
+  /// Hozir bajarilayotgan bosqich.
+  void active(String text, {String? hint}) => _step(cyan(sActive), text, hint);
+
+  /// Hali boshlanmagan bosqich.
+  void pending(String text, {String? hint}) => _step(grey(sPending), text, hint);
+
+  /// Ma'lumot qatori — muvaffaqiyat EMAS.
+  ///
+  /// Ilgari bunday qatorlar yashil `✔` bilan chiqardi va "bajarildi"
+  /// degan ma'noni bergandek tuyulardi.
+  void note(String text, {String? hint}) => _step(grey(sBullet), text, hint);
+
+  void warn(String text) => _step(yellow(sWarn), text, null);
+  void error(String text) => _step(red(sError), text, null);
+
+  void _step(String symbol, String text, String? hint) {
+    final prefix = '$_indent$symbol  ';
+    final available = columns - _visualLength(prefix) - 1;
+
+    if (hint == null) {
+      line('$prefix${_fit(text, available)}');
+      return;
+    }
+
+    // Izoh o'ng tomonda kulrang — sig'sa.
+    final hintText = grey(hint);
+    final combined = '$prefix$text  $hintText';
+    if (_visualLength(combined) <= columns) {
+      line(combined);
+    } else {
+      line('$prefix${_fit(text, available)}');
+      detail(hint);
+    }
+  }
+
+  /// Bosqich ostidagi izoh.
+  void detail(String text) {
+    final available = columns - indentDetail - 1;
+    line('$_indentDetail${grey(_fit(text, available))}');
+  }
+
+  /// Foydalanuvchi bajarishi kerak bo'lgan harakat.
+  void action(String text, {String? command}) {
+    if (command == null) {
+      line('$_indentDetail${cyan(sAction)} $text');
+    } else {
+      line('$_indentDetail${cyan(sAction)} $text');
+      line('$_indentDetail  ${cyan(command)}');
+    }
+  }
+
+  /// "kalit: qiymat" qatori.
   void kv(String key, String value) {
-    final k = key.padRight(22);
-    line('    ${grey(k)} ${bold(value)}');
+    final k = key.length >= keyColumnWidth
+        ? '${key.substring(0, keyColumnWidth - 1)} '
+        : key.padRight(keyColumnWidth);
+    final available = columns - indentMain - keyColumnWidth - 2;
+    line('$_indent${grey(k)} ${_fit(value, available)}');
   }
 
-  /// Bir qatorli foizli progress chizig'i.
+  // ─────────────────────────  PROGRESS  ─────────────────────────
+
+  /// Bir qatorli foizli progress.
+  ///
+  /// Tor terminalda o'ralib ketmasligi kafolatlanadi — ilgari 62 ustundan
+  /// tor bo'lsa bar o'raladi va `\x1B[2K` faqat oxirgi qatorni tozalab,
+  /// ekranda parcha qoldirardi.
   void progress({
     required double percent,
     required String label,
     required Duration elapsed,
+    Duration? remaining,
   }) {
-    final p = percent.clamp(0.0, 100.0);
-    if (!interactive) return;
+    if (!out.isRich) return;
 
-    // Birinchi marta chaqirilganda kursorni yashirish
-    if (!_barActive && _color) {
-      _raw('\x1B[?25l'); // Hide cursor
-    }
+    if (!_barActive && _color) _raw('\x1B[?25l');
 
-    const width = 26;
-    final filled = (width * p / 100).round().clamp(0, width);
+    final pct = percent.clamp(0.0, 100.0);
+    final pctText = '${pct.toStringAsFixed(0).padLeft(3)}%';
+    final time = formatDuration(elapsed);
+    final eta = remaining == null ? '' : '  ${formatDuration(remaining)} qoldi';
+
+    // Qat'iy qismlar: chekinish + qavslar + foiz + vaqt + ETA
+    final fixed = indentMain + 2 + pctText.length + 2 + time.length + eta.length + 4;
+    // Bar uchun qolgan joyning yarmi, lekin 10..26 oralig'ida.
+    final barWidth = math.max(10, math.min(26, (columns - fixed) ~/ 2));
+    final labelWidth = math.max(0, columns - fixed - barWidth - 2);
+
+    final filled = (barWidth * pct / 100).round().clamp(0, barWidth);
     final fillChar = ascii ? '#' : '█';
     final emptyChar = ascii ? '.' : '░';
-    final bar = fillChar * filled + emptyChar * (width - filled);
+    final bar = fillChar * filled + emptyChar * (barWidth - filled);
 
-    final pctText = '${p.toStringAsFixed(0).padLeft(3)}%';
-    final time = formatDuration(elapsed);
+    final open = ascii ? '[' : '▕';
+    final close = ascii ? ']' : '▏';
+    final colored = pct >= 100 ? green(bar) : cyan(bar);
 
-    var text = label;
-    final maxLabel = _labelWidth();
-    if (text.length > maxLabel) {
-      text = '${text.substring(0, maxLabel - 1)}…';
-    }
-    text = text.padRight(maxLabel);
+    final text = labelWidth <= 3 ? '' : '  ${_fit(label, labelWidth)}';
+    final output =
+        '$_indent$open$colored$close  ${bold(pctText)}$text  ${grey(time)}${grey(eta)}';
 
-    final colored = p >= 100 ? green(bar) : cyan(bar);
-    final out = '  ${ascii ? "[" : "▕"}$colored${ascii ? "]" : "▏"}  '
-        '${bold(pctText)}  $text ${grey(time)}';
-
-    _raw(_color ? '\x1B[2K\r$out' : '\r$out');
+    _raw(_color ? '\x1B[2K\r$output' : '\r$output');
     _barActive = true;
   }
 
-  int _labelWidth() {
-    var w = 44;
-    try {
-      if (stdout.hasTerminal) {
-        w = math.max(18, math.min(48, stdout.terminalColumns - 48));
-      }
-    } catch (_) {}
-    return w;
-  }
-
-  /// Progress qatorini yopib, o'rniga yakuniy xabar qo'yadi.
+  /// Progress qatorini yopadi.
   void progressDone(String message, {bool success = true}) {
-    _clearLine();
-    // Kursorni qaytarish
-    if (_color) {
-      _raw('\x1B[?25h'); // Show cursor
-    }
+    _clearBar();
+    if (_color) _raw('\x1B[?25h');
     if (success) {
-      ok(message);
+      done(message);
     } else {
       error(message);
     }
   }
 
-  /// Terminalga sig'adigan maksimal quti kengligi.
-  int get _maxBoxWidth {
-    try {
-      if (stdout.hasTerminal) {
-        return math.max(40, math.min(110, stdout.terminalColumns - 4));
-      }
-    } catch (_) {}
-    return 96;
-  }
+  // ─────────────────────────  QUTI  ─────────────────────────
 
+  /// Ramkali quti.
+  ///
+  /// Tuzatilgan xatolar:
+  ///   * ajratuvchi endi `├───┤` (ilgari `│───│` chizilardi)
+  ///   * uzun matn O'RALADI va kerak bo'lsa qisqartiriladi — ilgari
+  ///     chegaradan oshib, yopuvchi `│` keyingi qatorga tushib ketardi
+  ///   * sarlavha ham rang kodlarisiz o'lchanadi
   void box(String title, List<String> lines, {String color = 'green'}) {
+    final maxWidth = math.max(24, math.min(columns - indentMain * 2, 100));
+
+    // Mazmunni ramkaga sig'diramiz.
+    final contentWidth = maxWidth - 4;
+    final wrapped = <String>[];
+    for (final l in lines) {
+      if (_visualLength(l) <= contentWidth) {
+        wrapped.add(l);
+      } else if (_hasAnsi(l)) {
+        // Rangli qatorni xavfsiz o'rab bo'lmaydi — qisqartiramiz.
+        wrapped.add(_fit(l, contentWidth));
+      } else {
+        wrapped.addAll(wrapText(l, contentWidth));
+      }
+    }
+
     final width = math.min(
-      _maxBoxWidth,
+      maxWidth,
       math.max(
-        title.length + 4,
-        lines.fold<int>(0, (m, l) => math.max(m, _visualLength(l))) + 4,
+        _visualLength(title) + 4,
+        wrapped.fold<int>(0, (m, l) => math.max(m, _visualLength(l))) + 4,
       ),
     );
+
     final h = ascii ? '-' : '─';
     final tl = ascii ? '+' : '╭';
     final tr = ascii ? '+' : '╮';
     final bl = ascii ? '+' : '╰';
     final br = ascii ? '+' : '╯';
     final v = ascii ? '|' : '│';
+    final ml = ascii ? '+' : '├';
+    final mr = ascii ? '+' : '┤';
 
     String paint(String s) => switch (color) {
       'red' => red(s),
       'yellow' => yellow(s),
       'cyan' => cyan(s),
+      'grey' => grey(s),
       _ => green(s),
     };
 
-    line();
-    line('  ${paint("$tl${h * (width - 2)}$tr")}');
-    line(
-      '  ${paint(v)} ${bold(title)}${' ' * (width - 3 - title.length)}'
-      '${paint(v)}',
-    );
-    line('  ${paint("$v${h * (width - 2)}$v")}');
-    for (final l in lines) {
-      final pad = ' ' * math.max(0, width - 3 - _visualLength(l));
-      line('  ${paint(v)} $l$pad${paint(v)}');
+    String row(String content) {
+      final pad = ' ' * math.max(0, width - 3 - _visualLength(content));
+      return '$_indent${paint(v)} $content$pad${paint(v)}';
     }
-    line('  ${paint("$bl${h * (width - 2)}$br")}');
+
+    line();
+    line('$_indent${paint("$tl${h * (width - 2)}$tr")}');
+    line(row(bold(title)));
+    line('$_indent${paint("$ml${h * (width - 2)}$mr")}');
+    for (final l in wrapped) {
+      line(row(l));
+    }
+    line('$_indent${paint("$bl${h * (width - 2)}$br")}');
     line();
   }
 
-  int _visualLength(String s) =>
-      s.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '').length;
+  // ─────────────────────────  YORDAMCHILAR  ─────────────────────────
 
-  /// Foydalanuvchidan tanlov so'raydi (interaktiv menyu).
-  String? ask(String prompt, {String? defaultValue}) {
-    _clearLine();
-    stdout.write('  $prompt ');
-    final answer = stdin.readLineSync();
-    if (answer == null || answer.trim().isEmpty) return defaultValue;
-    return answer.trim();
+  static final _ansiPattern = RegExp(r'\x1B\[[0-9;?]*[A-Za-z]');
+
+  bool _hasAnsi(String s) => _ansiPattern.hasMatch(s);
+
+  /// Ko'rinadigan uzunlik — rang kodlari hisobga olinmaydi.
+  int _visualLength(String s) => s.replaceAll(_ansiPattern, '').runes.length;
+
+  /// Matnni berilgan kenglikka sig'diradi.
+  ///
+  /// Surrogat juftliklarni buzmaydi — `substring` bilan kesish `�`
+  /// belgisini chiqarardi (emoji va CJK belgilarda).
+  String _fit(String text, int width) {
+    if (width <= 0) return '';
+    if (_visualLength(text) <= width) return text;
+
+    // Rangli matnni xavfsiz kesib bo'lmaydi — rang kodlarini yo'qotamiz.
+    final plain = text.replaceAll(_ansiPattern, '');
+    final runes = plain.runes.toList();
+    final keep = math.max(0, width - sEllipsis.length);
+    return String.fromCharCodes(runes.take(keep)) + sEllipsis;
   }
 }
 
 /// Uzun matnni so'zlar bo'yicha bir nechta qatorga bo'ladi.
-/// Ikkinchi va keyingi qatorlar [indent] bilan chekinadi.
+///
+/// Chekinish endi FAQAT shu yerda qo'shiladi — chaqiruvchi tomonda yana
+/// bir marta qo'shilishi natijasida ko'chgan qatorlar 8-ustunga siljib
+/// ketardi.
 List<String> wrapText(String text, int width, {String indent = ''}) {
-  if (width <= 8) return [text];
-  final words = text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
-  final lines = <String>[];
-  var current = StringBuffer();
+  if (width <= 4) return [text];
 
-  for (final word in words) {
-    final limit = lines.isEmpty ? width : width - indent.length;
-    if (current.isEmpty) {
-      current.write(word);
-    } else if (current.length + 1 + word.length <= limit) {
-      current.write(' $word');
-    } else {
-      lines.add(lines.isEmpty ? current.toString() : '$indent$current');
-      current = StringBuffer(word);
+  final result = <String>[];
+  for (final paragraph in text.split('\n')) {
+    if (paragraph.trim().isEmpty) {
+      result.add('');
+      continue;
     }
+
+    final words = paragraph.split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+    var current = StringBuffer();
+    var isFirst = true;
+
+    void flush() {
+      if (current.isEmpty) return;
+      result.add((isFirst ? '' : indent) + current.toString());
+      isFirst = false;
+      current = StringBuffer();
+    }
+
+    for (final word in words) {
+      final limit = isFirst ? width : width - indent.length;
+
+      // Chegaradan uzun so'z — bo'lib tashlaymiz, aks holda quti sinadi.
+      if (word.runes.length > limit) {
+        flush();
+        var rest = word.runes.toList();
+        while (rest.length > limit) {
+          result.add((isFirst ? '' : indent) + String.fromCharCodes(rest.take(limit)));
+          isFirst = false;
+          rest = rest.skip(limit).toList();
+        }
+        if (rest.isNotEmpty) current.write(String.fromCharCodes(rest));
+        continue;
+      }
+
+      if (current.isEmpty) {
+        current.write(word);
+      } else if (current.length + 1 + word.length <= limit) {
+        current.write(' $word');
+      } else {
+        flush();
+        current.write(word);
+      }
+    }
+    flush();
   }
-  if (current.isNotEmpty) {
-    lines.add(lines.isEmpty ? current.toString() : '$indent$current');
-  }
-  return lines.isEmpty ? [''] : lines;
+
+  return result.isEmpty ? [''] : result;
 }
 
+/// `MM:SS` yoki soatdan oshsa `1:05:30`.
+///
+/// Ilgari soatdan oshganda `1s 05d` ko'rinishiga o'tardi va bu
+/// "1 sekund" deb o'qilardi.
 String formatDuration(Duration d) {
-  final m = d.inMinutes;
-  final s = d.inSeconds % 60;
-  if (m >= 60) {
-    final h = d.inHours;
-    return '${h}s ${(m % 60).toString().padLeft(2, '0')}d';
-  }
-  return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  final total = d.inSeconds;
+  final hours = total ~/ 3600;
+  final minutes = (total % 3600) ~/ 60;
+  final seconds = total % 60;
+
+  final mm = minutes.toString().padLeft(2, '0');
+  final ss = seconds.toString().padLeft(2, '0');
+
+  return hours > 0 ? '$hours:$mm:$ss' : '$mm:$ss';
 }
 
 String formatBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';
-  const units = ['KB', 'MB', 'GB'];
-  var value = bytes / 1024;
-  var i = 0;
-  while (value >= 1024 && i < units.length - 1) {
-    value /= 1024;
-    i++;
-  }
-  return '${value.toStringAsFixed(value >= 100 ? 0 : 1)} ${units[i]}';
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(0)} KB';
+  final mb = kb / 1024;
+  if (mb < 100) return '${mb.toStringAsFixed(1)} MB';
+  if (mb < 1024) return '${mb.toStringAsFixed(0)} MB';
+  return '${(mb / 1024).toStringAsFixed(2)} GB';
 }

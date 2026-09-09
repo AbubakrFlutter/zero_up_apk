@@ -31,17 +31,17 @@ class ZeroUpApkCli {
     try {
       results = parser.parse(args);
     } on FormatException catch (e) {
-      ui = Ui();
+      ui = Ui.simple();
       ui.error("Argument xatosi: ${e.message}");
       ui.line();
       _printUsage(parser);
       return 64;
     }
 
-    ui = Ui(ascii: results.flag('ascii'));
+    ui = Ui.simple(ascii: results.flag('ascii'));
 
     if (results.flag('help')) {
-      ui.banner(zeroUpApkVersion);
+      ui.header(zeroUpApkVersion);
       _printUsage(parser);
       return 0;
     }
@@ -59,7 +59,7 @@ class ZeroUpApkCli {
     try {
       command = parseCommand(results.rest);
     } on CommandParseError catch (e) {
-      ui.banner(zeroUpApkVersion);
+      ui.header(zeroUpApkVersion);
       ui.error(e.message);
       if (e.detail != null) ui.detail(e.detail!);
       if (e.didYouMean.isNotEmpty) {
@@ -70,7 +70,7 @@ class ZeroUpApkCli {
       return 64;
     }
 
-    ui.banner(zeroUpApkVersion);
+    ui.header(zeroUpApkVersion);
 
     // Saqlangan sozlamalar — `--out` va boshqalar uchun standart qiymatlar.
     final config = ZupConfig.load();
@@ -194,7 +194,7 @@ class ZeroUpApkCli {
       if (error != null) {
         ui.warn('Sozlamalar saqlanmadi: $error');
       } else {
-        ui.ok('Sozlamalar saqlandi (${ZupConfig.filePath})');
+        ui.done('Sozlamalar saqlandi (${ZupConfig.filePath})');
       }
     }
 
@@ -249,7 +249,7 @@ class ZeroUpApkCli {
     // --- Optimizatsiya ---
     ui.section('Optimizatsiya');
     final system = await SystemInfo.detect();
-    ui.step('Kompyuter quvvati: ${system.toString()}');
+    ui.note('Kompyuter quvvati: ${system.toString()}');
 
     // Disk to'lgan bo'lsa, Gradle tushunarsiz xatolar beradi — oldindan
     // ogohlantiramiz.
@@ -269,7 +269,7 @@ class ZeroUpApkCli {
       if (result.error != null) {
         ui.warn("gradle.properties sozlanmadi: ${result.error}");
       } else if (result.changed) {
-        ui.ok(
+        ui.done(
           "Gradle sozlandi: ${result.added.length} ta qo'shildi, "
           '${result.updated.length} ta yangilandi',
         );
@@ -284,7 +284,7 @@ class ZeroUpApkCli {
           );
         }
       } else {
-        ui.ok('Gradle allaqachon optimal sozlangan');
+        ui.note('Gradle allaqachon optimal sozlangan');
       }
       if (options.aggressive) {
         ui.warn(
@@ -293,39 +293,39 @@ class ZeroUpApkCli {
         );
       }
     } else {
-      ui.step("Gradle sozlamalariga tegilmadi (--no-tune)");
+      ui.note("Gradle sozlamalariga tegilmadi (--no-tune)");
     }
 
     if (options.onlyArm64) {
-      ui.ok("Faqat arm64 rejimi — AOT bosqichi ~2-3 barobar tez");
+      ui.note("Faqat arm64 rejimi — AOT bosqichi ~2-3 barobar tez");
     } else if (options.splitPerAbi && options.targets.contains(BuildTarget.apk)) {
-      ui.ok("ABI bo'yicha bo'lish yoqilgan — har bir APK ~2-3x kichik");
+      ui.note("ABI bo'yicha bo'lish yoqilgan — har bir APK ~2-3x kichik");
     }
     if (options.mode == BuildMode.release) {
-      ui.ok("Ikonka tree-shaking yoqilgan (ortiqcha glyphlar olib tashlanadi)");
+      ui.note("Ikonka tree-shaking yoqilgan (ortiqcha glyphlar olib tashlanadi)");
     }
 
     // --- Tayyorgarlik ---
     ui.section('Tayyorgarlik');
     if (options.clean) {
-      ui.step("flutter clean bajarilmoqda (sekinroq, lekin toza)...");
+      ui.note("flutter clean bajarilmoqda (sekinroq, lekin toza)...");
       await builder.clean();
-      ui.ok('Eski fayllar tozalandi');
+      ui.note('Eski fayllar tozalandi');
     } else {
-      ui.ok("Inkremental yig'ish — clean qilinmadi (asosiy tezlik manbai)");
+      ui.note("Inkremental yig'ish — clean qilinmadi (asosiy tezlik manbai)");
     }
 
     if (builder.needsPubGet()) {
-      ui.step('Paketlar yuklanmoqda (flutter pub get)...');
+      ui.note('Paketlar yuklanmoqda (flutter pub get)...');
       final ok = await builder.pubGet();
       if (!ok) {
         ui.error("Paketlarni yuklab bo'lmadi.");
         ui.detail("Internet aloqasini tekshirib, qaytadan urinib ko'ring.");
         return 70;
       }
-      ui.ok('Paketlar tayyor');
+      ui.note('Paketlar tayyor');
     } else {
-      ui.ok("Paketlar o'zgarmagan — pub get o'tkazib yuborildi");
+      ui.note("Paketlar o'zgarmagan — pub get o'tkazib yuborildi");
     }
 
     // --- Yig'ish ---
@@ -336,12 +336,12 @@ class ZeroUpApkCli {
       ui.section("${target.uzName} yig'ilmoqda");
       final expected = stats.expectedDuration(options.statsKey(target));
       if (expected != null) {
-        ui.step(
+        ui.note(
           "Taxminiy vaqt: ~${formatDuration(expected)} "
           "(oldingi yig'ishlarga asosan)",
         );
       } else {
-        ui.step(
+        ui.note(
           "Birinchi yig'ish — biroz uzoqroq davom etadi, "
           "keyingilari ancha tez bo'ladi",
         );
@@ -399,7 +399,7 @@ class ZeroUpApkCli {
           flutterVersion: await flutterVersionFuture,
           systemSummary: system.toString(),
         );
-        ui.ok('Papka yaratildi: ${p.basename(outputDir.path)}');
+        ui.done('Papka yaratildi: ${p.basename(outputDir.path)}');
       } catch (e) {
         ui.error("Fayllarni ko'chirib bo'lmadi: $e");
         ui.detail(
@@ -659,7 +659,7 @@ class ZeroUpApkCli {
           ui.error("Sozlamalarni tozalab bo'lmadi: $error");
           return 73;
         }
-        ui.ok('Sozlamalar tozalandi — hammasi standart holatga qaytdi.');
+        ui.done('Sozlamalar tozalandi — hammasi standart holatga qaytdi.');
         ui.detail('Fayllar yana ish stoliga (Desktop) tushadi.');
         ui.line();
         return 0;
@@ -671,7 +671,7 @@ class ZeroUpApkCli {
         ui.error("Saqlab bo'lmadi: $error");
         return 73;
       }
-      ui.ok("'$key' sozlamasi standart holatga qaytarildi.");
+      ui.done("'$key' sozlamasi standart holatga qaytarildi.");
       ui.line();
       return 0;
     }
@@ -733,7 +733,7 @@ class ZeroUpApkCli {
       return 73;
     }
 
-    ui.ok('Saqlandi! Endi fayllar shu yerga tushadi:');
+    ui.done('Saqlandi! Endi fayllar shu yerga tushadi:');
     ui.detail(absolute);
     ui.line();
     ui.detail('Ish stoliga qaytarish: zup config reset');
@@ -749,7 +749,7 @@ class ZeroUpApkCli {
       return 0;
     }
     if (tuner.restore()) {
-      ui.ok('gradle.properties asl holatiga qaytarildi.');
+      ui.done('gradle.properties asl holatiga qaytarildi.');
       return 0;
     }
     ui.error("Qaytarib bo'lmadi — faylni qo'lda tekshiring.");

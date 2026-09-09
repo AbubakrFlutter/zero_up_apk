@@ -34,8 +34,8 @@ Future<void> main(List<String> args) async {
 }
 
 void _showQuickHelp() {
-  final ui = Ui();
-  ui.banner(zeroUpApkVersion);
+  final ui = Ui.simple();
+  ui.header(zeroUpApkVersion);
   ui.line('  ${ui.bold("TEZ BOSHLASH")}');
   ui.line();
   ui.line('    ${ui.cyan("zup apk")}          ${ui.grey("APK yig'ish")}');
@@ -50,9 +50,9 @@ void _showQuickHelp() {
 ///
 /// Yangilashning o'zini Node bajaradi — bu yerda faqat holat ko'rsatiladi.
 Future<void> _showUpdateInfo() async {
-  final ui = Ui();
-  ui.banner(zeroUpApkVersion);
-  ui.step('Yangi versiya qidirilmoqda...');
+  final ui = Ui.simple();
+  ui.header(zeroUpApkVersion);
+  ui.note('Yangi versiya qidirilmoqda...');
 
   final checker = UpdateChecker(currentVersion: currentVersion);
   final latest = await checker.fetchLatestVersion();
@@ -68,12 +68,12 @@ Future<void> _showUpdateInfo() async {
   }
 
   if (!isNewerVersion(latest, currentVersion)) {
-    ui.ok("Siz allaqachon eng so'nggi versiyadasiz ($currentVersion)");
+    ui.done("Siz allaqachon eng so'nggi versiyadasiz ($currentVersion)");
     ui.line();
     return;
   }
 
-  ui.step('Yangi versiya mavjud: $latest');
+  ui.note('Yangi versiya mavjud: $latest');
   ui.line();
   ui.detail('Yangilash uchun:  zup update');
   ui.line();

@@ -242,7 +242,7 @@ class FlutterBuilder {
       var lastMilestone = 0;
       timer = Timer.periodic(const Duration(milliseconds: 120), (_) {
         tracker.tick();
-        if (ui.interactive) {
+        if (ui.out.isRich) {
           ui.progress(
             percent: tracker.percent,
             label: tracker.label,

@@ -11,6 +11,7 @@ export 'src/console.dart';
 export 'src/error_translator.dart';
 export 'src/gradle_tuner.dart';
 export 'src/output_manager.dart';
+export 'src/output_mode.dart';
 export 'src/progress_tracker.dart';
 export 'src/project_info.dart';
 export 'src/system_info.dart';

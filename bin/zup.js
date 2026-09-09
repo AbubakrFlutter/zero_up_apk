@@ -442,6 +442,29 @@ function saveAndReport(config, message) {
   console.log('');
 }
 
+
+/**
+ * Dart'ga uzatiladigan muhit o'zgaruvchilari.
+ *
+ * Dart bu faktlarni O'ZI TO'G'RI BILA OLMAYDI:
+ *   * stdin terminalmi — Dart faqat stdout ni tekshirardi, shu sababli
+ *     `echo | zup` da "terminal bor" deb menyu ochib yuborardi
+ *   * stdout quvurga yo'naltirilgani "terminal yo'q" degani emas —
+ *     Node yordamni sahifalash uchun uni ataylab ushlab oladi
+ *   * terminal kengligi — Node stdout ni ushlaganda Dart uni bilmaydi
+ */
+function dartEnv(extra) {
+  return {
+    ...process.env,
+    ZUP_STDIN_TTY: process.stdin.isTTY ? '1' : '0',
+    ZUP_STDOUT_TTY: process.stdout.isTTY ? '1' : '0',
+    ZUP_COLUMNS: String(process.stdout.columns || 80),
+    ZUP_FROM: 'node',
+    ZUP_RUN_MODE:
+      fs.existsSync(targetPath) && !isMarkedBlocked() ? 'binary' : 'source',
+    ...(extra || {}),
+  };
+}
 // ─────────────────────────  DART NI ISHGA TUSHIRISH  ─────────────────────────
 
 /**
@@ -462,6 +485,9 @@ function runAndCapture(args) {
         try {
           child = spawn(cmd, cmdArgs, {
             stdio: ['ignore', 'pipe', 'pipe'],
+            // Sahifalovchi rangli matnni ko'rsata oladi, shuning uchun
+            // Dart'ga "terminal bor" deb bildiramiz.
+            env: dartEnv({ ZUP_STDOUT_TTY: '1' }),
           });
         } catch (err) {
           return done({ text: '', failed: true });
@@ -508,8 +534,9 @@ function runViaDartAndWait(args, dart) {
     ensureDeps(dart);
     const absoluteEntry = path.join(packageRoot, entryPoint);
     const child = spawn(dart, ['run', absoluteEntry, ...args], {
-      stdio: 'inherit',
-    });
+    stdio: 'inherit',
+    env: dartEnv(),
+  });
     child.on('exit', () => resolve());
     child.on('error', () => resolve());
   });
@@ -553,7 +580,7 @@ function spawnBinary(args, dart) {
   try {
     // shell ISHLATILMAYDI: u argumentlarni qalqonlamasdan qo'shib yuboradi,
     // ya'ni bo'sh joyli yo'llar buziladi (--out "D:\Mening APK").
-    child = spawn(targetPath, args, { stdio: 'inherit' });
+    child = spawn(targetPath, args, { stdio: 'inherit', env: dartEnv() });
   } catch (err) {
     handleSpawnFailure(err, args, dart);
     return;
@@ -599,6 +626,7 @@ function runViaDart(args, dart) {
   const absoluteEntry = path.join(packageRoot, entryPoint);
   const child = spawn(dart, ['run', absoluteEntry, ...args], {
     stdio: 'inherit',
+    env: dartEnv(),
   });
 
   child.on('exit', (code, signal) => {
