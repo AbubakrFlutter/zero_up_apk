@@ -19,9 +19,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const { findDart, buildBinary, zupDir, targetPath } = require('./zup-build.js');
+const { findDart, buildBinary, zupDir, targetPath } = require('./build.js');
 
-const VERSION = require('./package.json').version;
+const VERSION = require('../package.json').version;
 
 main();
 

@@ -15,11 +15,12 @@ const {
   targetPath,
   zupDir,
   platform,
-} = require('../zup-build.js');
+} = require('../node/build.js');
 
-const menu = require('../zup-menu.js');
-const cfg = require('../zup-config.js');
-const { buildMainMenu } = require('../zup-actions.js');
+const menu = require('../node/menu.js');
+const cfg = require('../node/config.js');
+const { buildMainMenu } = require('../node/actions.js');
+const { classify } = require('../node/args.js');
 
 const PACKAGE_NAME = 'zero_up_apk';
 const currentVersion = require('../package.json').version;
@@ -34,37 +35,86 @@ const argv = process.argv.slice(2);
 main();
 
 async function main() {
-  // `zup update` — Node bajaradi, chunki yangilash zup.exe ni qayta yasaydi,
-  // Windows esa ishlab turgan .exe ni almashtirishga ruxsat bermaydi.
-  if (argv.length === 1 && (argv[0] === 'update' || argv[0] === '--update')) {
+  const a = classify(argv);
+
+  // 1) `zup update` — Node bajaradi, chunki yangilash zup.exe ni qayta
+  //    yasaydi, Windows esa ishlab turgan .exe ni almashtirishga ruxsat
+  //    bermaydi. `classify` uni argv ning istalgan joyidan topadi —
+  //    ilgari faqat yolg'iz kelganda ushlanardi va `zup update apk`
+  //    yig'ishga tushib ketardi.
+  if (a.command === 'update') {
     update();
     return;
   }
 
-  // Argumentsiz va terminal bor — asosiy menyu.
-  //
-  // Menyu AYNAN SHU YERDA (Dart'da emas): Windows konsoli strelka tugmalarini
-  // bayt sifatida yubormaydi, Node esa buni o'zi tarjima qiladi.
-  if (argv.length === 0 && menu.isInteractive()) {
+  // 2) Binary versiyasi paket versiyasiga mos kelmasa — qayta yasaymiz.
+  //    Aks holda eski binary yangi buyruqlarga javob beraveradi.
+  ensureBinaryFresh();
+
+  // 3) Buyruq so'zi yo'q.
+  if (a.command === null && !a.flags.help && !a.flags.version) {
+    if (!menu.isInteractive()) {
+      // Terminal yo'q — Dart aniq xato bersin (chiqish kodi 64).
+      runWith(a.argv);
+      return;
+    }
+
     const chosen = await menuSession(mainMenuLoop);
     if (chosen === null) return; // foydalanuvchi chiqdi
-    runWith(chosen);
+
+    // Foydalanuvchi bergan bayroqlarni SAQLAYMIZ: `zup --clean` →
+    // menyudan "APK" tanlansa → `apk --clean`.
+    runWith([...chosen, ...a.argv]);
     return;
   }
 
-  // `zup config` (qo'shimcha argumentsiz) — sozlamalar menyusi ham shu yerda,
-  // strelkalar ishlashi uchun. `zup config --out ...` va `zup config reset`
-  // esa Dart tomonida bajariladi (ular menyusiz ishlaydi).
+  // 4) `zup config` (qo'shimcha so'z va bayroqsiz) — sozlamalar menyusi.
+  //    `zup config --out ...` va `zup config reset` Dart tomonida.
   if (
-    argv.length === 1 &&
-    (argv[0] === 'config' || argv[0] === 'sozlama') &&
+    a.command === 'config' &&
+    a.commandArgs.length === 0 &&
+    a.argv.length === 1 &&
     menu.isInteractive()
   ) {
     await menuSession(configLoop);
     return;
   }
 
-  runWith(argv);
+  runWith(a.argv);
+}
+
+/**
+ * O'rnatilgan binary paket versiyasiga mos keladimi?
+ *
+ * NEGA KERAK: `postinstall` `~/.zup/VERSION` yozadi, lekin uni hech kim
+ * o'qimasdi. Agar o'rnatish paytida kompilyatsiya yiqilsa (Dart hali yo'q,
+ * yoki exe ishlab turgan zup tomonidan qulflangan), ESKI binary yangi
+ * buyruqlarga javob beraverardi. 2.0 da bu — agent JSON o'rniga o'zbekcha
+ * matn oladi.
+ */
+function ensureBinaryFresh() {
+  try {
+    if (!fs.existsSync(targetPath)) return; // yo'q bo'lsa keyin yasaladi
+
+    const versionFile = path.join(zupDir, 'VERSION');
+    const installed = fs.existsSync(versionFile)
+      ? fs.readFileSync(versionFile, 'utf8').trim()
+      : null;
+
+    if (installed === currentVersion) return;
+
+    const dart = findDart();
+    if (!dart) return; // Dart yo'q — eski binary bilan davom etamiz
+
+    console.error(
+      `zup yangilandi (${installed ?? 'noma\'lum'} → ${currentVersion}), qayta yasalmoqda...`,
+    );
+    if (buildBinary(dart, { log: (m) => console.error(m) })) {
+      fs.writeFileSync(versionFile, currentVersion);
+    }
+  } catch (_) {
+    // Tekshiruv tufayli zup ishdan chiqmasligi kerak.
+  }
 }
 
 // ─────────────────────────────  ASOSIY MENYU  ─────────────────────────────

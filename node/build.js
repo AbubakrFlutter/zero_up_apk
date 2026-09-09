@@ -20,8 +20,12 @@ const zupDir = path.join(homeDir, '.zup');
 const binaryName = platform === 'win32' ? 'zup.exe' : 'zup';
 const targetPath = path.join(zupDir, binaryName);
 
-/** Paket ildizi (bu fayl shu yerda turadi). */
-const packageRoot = __dirname;
+/// Paket ildizi — bu fayl `node/` ichida, shuning uchun bir daraja yuqori.
+///
+/// DIQQAT: bu `dart pub get` ishlaydigan papka va `bin/zero_up_apk.dart`
+/// yo'li shundan hisoblanadi. `__dirname` deb qoldirilsa kompilyatsiya
+/// `node/` papkasida ishlashga urinadi va buziladi.
+const packageRoot = path.resolve(__dirname, '..');
 
 /** Dart kirish nuqtasi (paket ildizidan nisbatan). */
 const entryPoint = path.join('bin', 'zero_up_apk.dart');
