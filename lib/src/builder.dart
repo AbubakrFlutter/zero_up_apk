@@ -114,8 +114,11 @@ class FlutterBuilder {
     }
 
     if (options.mode == BuildMode.release) {
-      // Ishlatilmagan ikonka glyphlarini olib tashlaydi (hajm kamayadi).
-      args.add('--tree-shake-icons');
+      // Ilgari bu qattiq kodlangan edi va uni faqat
+      // `--extra=--no-tree-shake-icons` bilan tasodifan bekor qilish
+      // mumkin edi (chunki extraArgs keyinroq qo'shiladi).
+      if (options.treeShakeIcons) args.add('--tree-shake-icons');
+
       if (options.obfuscate) {
         args
           ..add('--obfuscate')
@@ -125,6 +128,9 @@ class FlutterBuilder {
       }
     }
 
+    if (options.entryPoint != null) {
+      args.add('--target=${options.entryPoint}');
+    }
     if (options.flavor != null) args.add('--flavor=${options.flavor}');
     if (options.buildName != null) {
       args.add('--build-name=${options.buildName}');
@@ -135,13 +141,40 @@ class FlutterBuilder {
     for (final define in options.dartDefines) {
       args.add('--dart-define=$define');
     }
-    args.addAll(options.extraArgs);
 
-    // Gradle task nomlarini ko'rish uchun kerak — aynan shu tufayli
-    // foiz ko'rsatkichi haqiqiy jarayonga mos bo'ladi.
+    // Gradle task nomlarini ko'rish uchun kerak — foiz ko'rsatkichi
+    // shu qatorlardan hisoblanadi. extraArgs DAN OLDIN qo'shamiz, aks
+    // holda `--extra=-v` ikkita `-v` beradi.
     args.add('-v');
 
+    args.addAll(options.extraArgs);
+
     return args;
+  }
+
+  /// `--extra` orqali berilgan argument zup o'zi yuboradigan bayroq bilan
+  /// to'qnashadimi?
+  ///
+  /// Ilgari tekshirilmasdi va foydalanuvchi bilmasdan zup ning bayrog'ini
+  /// takrorlashi yoki unga qarama-qarshi qiymat berishi mumkin edi.
+  static const deniedExtraFlags = {
+    '--release', '--profile', '--debug',
+    '--split-per-abi', '--target-platform',
+    '--tree-shake-icons', '--no-tree-shake-icons',
+    '--obfuscate', '--split-debug-info',
+    '--flavor', '--build-name', '--build-number',
+    '--dart-define', '--target', '-t',
+    '-v', '--verbose',
+  };
+
+  /// To'qnashuvlarni topadi. Bo'sh ro'yxat — hammasi joyida.
+  static List<String> findExtraConflicts(List<String> extraArgs) {
+    final conflicts = <String>[];
+    for (final arg in extraArgs) {
+      final name = arg.split('=').first.trim();
+      if (deniedExtraFlags.contains(name)) conflicts.add(name);
+    }
+    return conflicts;
   }
 
   /// `flutter clean` — faqat so'ralganda.

@@ -10,18 +10,64 @@ import 'builder.dart';
 import 'command_spec.dart';
 import 'config.dart';
 import 'console.dart';
+import 'doctor.dart';
 import 'error_translator.dart';
 import 'gradle_tuner.dart';
+import 'json_result.dart';
 import 'output_manager.dart';
+import 'output_mode.dart';
 import 'project_info.dart';
 import 'system_info.dart';
 
 const zeroUpApkVersion = '2.0.0';
 
+/// Terminal holatini xavfsiz aniqlash — chaqiruvlar istisno tashlashi mumkin.
+bool _stdoutHasTerminal() {
+  try {
+    return stdout.hasTerminal;
+  } catch (_) {
+    return false;
+  }
+}
+
+bool _stdoutAnsi() {
+  try {
+    return stdout.hasTerminal && stdout.supportsAnsiEscapes;
+  } catch (_) {
+    return false;
+  }
+}
+
+int? _stdoutColumns() {
+  try {
+    return stdout.hasTerminal ? stdout.terminalColumns : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Buyruq qatori interfeysi — barcha bosqichlarni boshqaradi.
 class ZeroUpApkCli {
   late Ui ui;
   FlutterBuilder? _builder;
+
+  /// JSON rejimida natijani yig'ib boradi. Oddiy rejimda `null`.
+  JsonResult? _json;
+
+  /// JSON rejimida natijani chiqarib, chiqish kodini qaytaradi.
+  ///
+  /// Har bir chiqish nuqtasida shu orqali o'tiladi — shunda JSON
+  /// rejimida hech qanday yo'l "jim" tugamaydi.
+  int _finish(int code, {String? errorCode, String? errorMessage}) {
+    final json = _json;
+    if (json == null) return code;
+
+    if (errorCode != null) {
+      json.setError(code: errorCode, message: errorMessage ?? '');
+    }
+    json.emit(ok: code == 0, exitCode: code);
+    return code;
+  }
 
   Future<int> run(List<String> args) async {
     enableUtf8Console();
@@ -31,14 +77,35 @@ class ZeroUpApkCli {
     try {
       results = parser.parse(args);
     } on FormatException catch (e) {
-      ui = Ui.simple();
+      // Bu yerda `--ascii` hali ma'lum emas, lekin uni argv dan
+      // to'g'ridan-to'g'ri ko'rib olamiz — ilgari xato xabari Unicode
+      // bilan chiqib, `--ascii` ni buzardi.
+      ui = Ui.simple(ascii: args.contains('--ascii'));
       ui.error("Argument xatosi: ${e.message}");
       ui.line();
       _printUsage(parser);
       return 64;
     }
 
-    ui = Ui.simple(ascii: results.flag('ascii'));
+    // Chiqish rejimi — BIR JOYDA hal qilinadi.
+    final decision = decideOutput(
+      json: results.flag('json'),
+      ai: results.flag('ai'),
+      quiet: results.flag('quiet'),
+      noColor: results.flag('no-color'),
+      ascii: results.flag('ascii'),
+      noProgress: results.flag('no-progress'),
+      env: Platform.environment,
+      stdoutHasTerminal: _stdoutHasTerminal(),
+      stdoutAnsi: _stdoutAnsi(),
+      stdoutColumns: _stdoutColumns(),
+    );
+
+    // JSON rejimida odamlarga mo'ljallangan matn STDERR ga ketadi —
+    // stdout'da faqat bitta JSON obyekt qolishi shart, aks holda agent
+    // uni parse qila olmaydi.
+    ui = Ui(decision, sink: decision.isJson ? stderr : stdout);
+
 
     if (results.flag('help')) {
       ui.header(zeroUpApkVersion);
@@ -59,6 +126,21 @@ class ZeroUpApkCli {
     try {
       command = parseCommand(results.rest);
     } on CommandParseError catch (e) {
+      if (_json != null) {
+        _json = JsonResult(kind: 'error', toolVersion: zeroUpApkVersion)
+          ..setError(
+            code: e.code,
+            message: e.message,
+            detail: e.detail,
+            argument: e.argument,
+            didYouMean: e.didYouMean,
+            remedies: e.didYouMean
+                .map((s) => Remedy('Shuni nazarda tutdingizmi?', command: 'zup $s'))
+                .toList(),
+          );
+        _json!.emit(ok: false, exitCode: 64);
+        return 64;
+      }
       ui.header(zeroUpApkVersion);
       ui.error(e.message);
       if (e.detail != null) ui.detail(e.detail!);
@@ -68,6 +150,23 @@ class ZeroUpApkCli {
       }
       ui.line();
       return 64;
+    }
+
+    // JSON konvertining 'kind' maydoni buyruqqa qarab belgilanadi —
+    // agent shunga qarab 'data' ning shaklini biladi.
+    if (decision.isJson) {
+      _json = JsonResult(
+        kind: switch (command) {
+          DoctorCommand() => 'doctor',
+          InfoCommand() => 'info',
+          DevicesCommand() => 'devices',
+          LastCommand() => 'history',
+          InstallCommand() => 'install',
+          ConfigCommand() => 'config',
+          _ => 'build',
+        },
+        toolVersion: zeroUpApkVersion,
+      );
     }
 
     ui.header(zeroUpApkVersion);
@@ -86,6 +185,7 @@ class ZeroUpApkCli {
       case ConfigCommand():
         return _configCommand(results, command, config);
       case DoctorCommand():
+        return _doctorCommand(results);
       case InfoCommand():
       case DevicesCommand():
       case LastCommand():
@@ -94,7 +194,7 @@ class ZeroUpApkCli {
         ui.error("Bu buyruq hali tayyor emas.");
         ui.detail('zup 2.0 ning keyingi bosqichida qo\'shiladi.');
         ui.line();
-        return 64;
+        return _finish(64, errorCode: 'NOT_IMPLEMENTED', errorMessage: 'Buyruq hali tayyor emas');
       case BuildCommand():
       case RestoreGradleCommand():
         break; // loyiha kerak — pastda davom etadi
@@ -110,7 +210,7 @@ class ZeroUpApkCli {
       ui.detail('Papka: $projectPath');
       ui.detail("pubspec.yaml fayli bor papkada ishga tushiring yoki");
       ui.detail("--path bilan loyiha yo'lini ko'rsating.");
-      return 66;
+      return _finish(66, errorCode: 'NO_PROJECT', errorMessage: "Bu papkada Flutter loyihasi topilmadi");
     }
 
     if (results.flag('restore-gradle')) {
@@ -125,7 +225,7 @@ class ZeroUpApkCli {
         "APK ga yig'ib bo'lmaydi.",
       );
       ui.detail("Ilova loyihasida ishga tushiring yoki --path bilan ko'rsating.");
-      return 66;
+      return _finish(66, errorCode: 'NO_ANDROID_DIR', errorMessage: "Loyihada 'android' papkasi yo'q");
     }
 
     // 2) Nima yig'amiz? — buyruq grammatikasi allaqachon aniqlagan.
@@ -137,12 +237,26 @@ class ZeroUpApkCli {
     final targets = command.targets;
     if (targets.isEmpty) {
       ui.error("Yig'ish uchun hech narsa tanlanmadi.");
-      return 64;
+      return _finish(64, errorCode: 'MISSING_TARGET', errorMessage: "Yig'ish uchun hech narsa tanlanmadi");
     }
 
     // Bayroq berilmagan bo'lsa — saqlangan sozlama, u ham bo'lmasa — standart.
-    bool merged(String name, bool? saved, bool fallback) =>
-        results.wasParsed(name) ? results.flag(name) : (saved ?? fallback);
+    //
+    // Qiymat QAYERDAN kelganini ham yozib boramiz: ilgari ogohlantirishlar
+    // `results.wasParsed` ga tayanardi va sozlamadan kelgan `arm64`
+    // `--split` ni jim o'chirsa, foydalanuvchi bexabar qolardi.
+    bool merged(String name, bool? saved, bool fallback) {
+      if (results.wasParsed(name)) {
+        _sources[name] = 'flag';
+        return results.flag(name);
+      }
+      if (saved != null) {
+        _sources[name] = 'config';
+        return saved;
+      }
+      _sources[name] = 'default';
+      return fallback;
+    }
 
     final mode = switch (results.option('mode')) {
       'debug' => BuildMode.debug,
@@ -167,8 +281,11 @@ class ZeroUpApkCli {
       buildName: results.option('build-name'),
       buildNumber: results.option('build-number'),
       verbose: results.flag('verbose'),
-      ascii: results.flag('ascii'),
       extraArgs: results.multiOption('extra'),
+      entryPoint: results.option('target'),
+      treeShakeIcons: results.flag('tree-shake-icons'),
+      install: results.flag('install'),
+      deviceId: results.option('device'),
     );
 
     final openFolder = merged('open', config.openFolder, false);
@@ -219,6 +336,12 @@ class ZeroUpApkCli {
     required bool openFolder,
   }) async {
     final totalStart = DateTime.now();
+
+    // JSON rejimida natijani yig'ib boramiz.
+    _json
+      ?..setProject(project)
+      ..setRequest(options, _resolvedSources(options));
+
     final stats = BuildStats.load(project.root);
     final builder = FlutterBuilder(
       ui: ui,
@@ -358,11 +481,20 @@ class ZeroUpApkCli {
         );
         if (result.cancelled) {
           ui.restoreCursor();
-          return 130;
+          _json?.setFailure(
+            phase: FailurePhase.gradle,
+            target: target,
+            code: 'CANCELLED',
+            title: "To'xtatildi",
+            reason: "Yig'ish foydalanuvchi tomonidan to'xtatildi.",
+            logPath: result.logPath,
+          );
+          return _finish(130);
         }
         _reportFailure(result);
         ui.restoreCursor();
-        return 70;
+        _recordFailure(result, target);
+        return _finish(70);
       }
 
       ui.progressDone(
@@ -377,6 +509,7 @@ class ZeroUpApkCli {
         ui.warn("Yig'ilgan fayl topilmadi — build papkasini tekshiring");
       }
       artifactsByTarget[target] = artifacts;
+      _lastResults[target] = result;
     }
 
     // --- Fayllarni yetkazish ---
@@ -427,7 +560,61 @@ class ZeroUpApkCli {
     // Terminal kursorini tiklash
     ui.restoreCursor();
 
-    return 0;
+    if (_json != null) {
+      for (final entry in artifactsByTarget.entries) {
+        final target = entry.key;
+        final result = _lastResults[target];
+        final files = delivered.where((f) => f.target == target).toList();
+        _json!.addTarget(
+          target: target,
+          duration: durations[target] ?? Duration.zero,
+          gradleTasks: result?.taskCount ?? 0,
+          logPath: result?.logPath ?? '',
+          artifacts: files,
+        );
+      }
+      _json!.setOutputDir(outputDir?.path);
+    }
+
+    return _finish(0);
+  }
+
+  /// Har bir sozlama qayerdan kelgani — `flag`, `config` yoki `default`.
+  ///
+  /// Agentga "nega arm64 yig'ilyapti, men so'ramadim-ku?" degan savolga
+  /// javob beradi — sozlama fayliga qaramasdan.
+  Map<String, String> _resolvedSources(BuildOptions options) => _sources;
+
+  final Map<String, String> _sources = {};
+  final Map<BuildTarget, BuildResult> _lastResults = {};
+
+  /// Yiqilgan yig'ish haqidagi ma'lumotni JSON ga yozadi.
+  void _recordFailure(BuildResult result, BuildTarget target) {
+    final json = _json;
+    if (json == null) return;
+
+    final translated = ErrorTranslator.translate(result.logTail);
+    final highlights = ErrorTranslator.highlights(result.logTail, max: 15);
+
+    json.setFailure(
+      phase: FailurePhase.gradle,
+      target: target,
+      code: translated?.code ?? 'UNKNOWN',
+      title: translated?.title ?? "Yig'ish bajarilmadi",
+      reason: translated?.reason ??
+          "Aniq sababni avtomatik aniqlab bo'lmadi.",
+      retryable: translated?.retryable ?? false,
+      toolExitCode: result.exitCode,
+      matchedLine: translated?.rawLine,
+      remedies: translated == null ? const [] : remediesFrom(translated),
+      logPath: result.logPath,
+      logLineCount: result.logTail.length,
+      highlights: [
+        for (var i = 0; i < highlights.length; i++)
+          LogHighlight(i + 1, highlights[i]),
+      ],
+      logTail: result.logTail,
+    );
   }
 
   void _printSummary({
@@ -574,11 +761,53 @@ class ZeroUpApkCli {
     required BuildOptions options,
     required bool openFolder,
   }) {
-    // 1) build-number butun son bo'lishi shart — aks holda Gradle tushunarsiz
-    // xato beradi.
+    // 0) `--extra` zup ning o'z bayroqlarini takrorlamasligi kerak.
+    final conflicts = FlutterBuilder.findExtraConflicts(options.extraArgs);
+    if (conflicts.isNotEmpty) {
+      ui.error("--extra zup ning bayrog'ini takrorlaydi: ${conflicts.join(', ')}");
+      ui.detail('Bular uchun alohida bayroqlar bor:');
+      ui.detail('  -v → --verbose,  --target → -t,  --flavor → --flavor');
+      ui.line();
+      return 64;
+    }
+
+    // 0.1) Kirish fayli mavjudmi?
+    final entry = options.entryPoint;
+    if (entry != null) {
+      final file = File(p.join(options.projectPath, entry));
+      if (!file.existsSync() && !File(entry).existsSync()) {
+        ui.error("Kirish fayli topilmadi: $entry");
+        ui.detail('Masalan: -t lib/main_dev.dart');
+        ui.line();
+        return 64;
+      }
+    }
+
+    // 0.2) Flavor nomi — Gradle uni identifikator sifatida ishlatadi.
+    final flavor = options.flavor;
+    if (flavor != null && !RegExp(r'^[A-Za-z][A-Za-z0-9_]*$').hasMatch(flavor)) {
+      ui.error("--flavor nomi noto'g'ri: '$flavor'");
+      ui.detail('Harf bilan boshlanib, faqat harf/raqam/pastki chiziq bo\'lishi kerak.');
+      ui.line();
+      return 64;
+    }
+
+    // 0.3) Versiya nomi — `1`, `1.0` yoki `1.0.0`.
+    final buildName = options.buildName;
+    if (buildName != null &&
+        !RegExp(r'^\d+(\.\d+){0,2}$').hasMatch(buildName)) {
+      ui.error("--build-name noto'g'ri: '$buildName'");
+      ui.detail('Masalan: --build-name=1.2.3');
+      ui.line();
+      return 64;
+    }
+
+    // 1) build-number musbat butun son bo'lishi shart — aks holda Gradle
+    // tushunarsiz xato beradi. Ilgari 0 va manfiy sonlar o'tib ketardi.
     final buildNumber = options.buildNumber;
-    if (buildNumber != null && int.tryParse(buildNumber) == null) {
-      ui.error("--build-number butun son bo'lishi kerak: '$buildNumber'");
+    final parsedNumber = buildNumber == null ? null : int.tryParse(buildNumber);
+    if (buildNumber != null && (parsedNumber == null || parsedNumber < 1)) {
+      ui.error("--build-number musbat butun son bo'lishi kerak: '$buildNumber'");
       ui.detail('Masalan: --build-number=12');
       return 64;
     }
@@ -624,10 +853,15 @@ class ZeroUpApkCli {
       );
     }
 
-    if (options.onlyArm64 &&
-        results.wasParsed('split') &&
-        results.flag('split')) {
-      ui.warn("--arm64 berilgani uchun --split e'tiborsiz qoldirildi");
+    // arm64 yoqilgan bo'lsa split ishlamaydi — MANBASIDAN QAT'I NAZAR
+    // ogohlantiramiz. Ilgari faqat bayroq qo'lda yozilganda ogohlantirardi,
+    // sozlamadan kelgan arm64 esa split'ni jim o'chirardi.
+    if (options.onlyArm64 && options.splitPerAbi) {
+      final from = _sources['arm64'] == 'config' ? ' (sozlamadan)' : '';
+      final message =
+          "--arm64$from berilgani uchun --split e'tiborsiz qoldirildi";
+      ui.warn(message);
+      _json?.warn('SPLIT_IGNORED_ARM64', message);
     }
 
     if (options.aggressive && !options.tune) {
@@ -739,6 +973,67 @@ class ZeroUpApkCli {
     ui.detail('Ish stoliga qaytarish: zup config reset');
     ui.line();
     return 0;
+  }
+
+  /// `zup doctor` — muhitni tekshiradi.
+  Future<int> _doctorCommand(ArgResults results) async {
+    final projectPath = p.normalize(p.absolute(results.option('path') ?? '.'));
+    final doctor = Doctor(
+      env: Platform.environment,
+      projectPath: Directory(projectPath).existsSync() ? projectPath : null,
+    );
+
+    final checks = await doctor.run();
+    final failed = checks.where((c) => c.status == DoctorStatus.fail).length;
+    final warned = checks.where((c) => c.status == DoctorStatus.warn).length;
+    final passed = checks.where((c) => c.status == DoctorStatus.pass).length;
+
+    // Muhim tashqi vosita yo'q bo'lsa — 69 (EX_UNAVAILABLE).
+    final exit = failed > 0 ? 69 : 0;
+
+    final json = _json;
+    if (json != null) {
+      json.data['summary'] = {
+        'pass': passed,
+        'warn': warned,
+        'fail': failed,
+        'skip': checks.where((c) => c.status == DoctorStatus.skip).length,
+      };
+      json.data['checks'] = checks.map((c) => c.toJson()).toList();
+      json.emit(ok: failed == 0, exitCode: exit);
+      return exit;
+    }
+
+    ui.section('Muhit tekshiruvi');
+    for (final check in checks) {
+      switch (check.status) {
+        case DoctorStatus.pass:
+          ui.done(check.label, hint: check.message);
+        case DoctorStatus.warn:
+          ui.warn('${check.label} — ${check.message}');
+        case DoctorStatus.fail:
+          ui.error('${check.label} — ${check.message}');
+        case DoctorStatus.skip:
+          ui.pending(check.label, hint: check.message);
+      }
+      if (check.status != DoctorStatus.pass) {
+        for (final remedy in check.remedies) {
+          ui.action(remedy);
+        }
+      }
+    }
+
+    ui.line();
+    if (failed > 0) {
+      ui.error("$failed ta muammo topildi — yig'ish ishlamasligi mumkin");
+    } else if (warned > 0) {
+      ui.warn("$warned ta ogohlantirish, lekin yig'ish ishlaydi");
+    } else {
+      ui.done('Hammasi joyida');
+    }
+    ui.line();
+
+    return exit;
   }
 
   Future<int> _restoreGradle(ProjectInfo project) async {
@@ -871,6 +1166,47 @@ class ZeroUpApkCli {
       help: "To'liq logni ko'rsatish.",
     )
     ..addFlag('ascii', defaultsTo: false, help: 'Faqat oddiy belgilar.')
+    // ── Chiqish ko'rinishi ──
+    ..addFlag(
+      'json',
+      negatable: false,
+      help: 'Natijani JSON ko\'rinishida chiqarish.',
+    )
+    ..addFlag(
+      'ai',
+      negatable: false,
+      help: 'AI rejimi: JSON, savolsiz, rangsiz (zup ai ... bilan bir xil).',
+    )
+    ..addFlag(
+      'quiet',
+      abbr: 'q',
+      negatable: false,
+      help: 'Faqat ogohlantirish va xatolar.',
+    )
+    ..addFlag('no-color', negatable: false, help: 'Ranglarni o\'chirish.')
+    ..addFlag(
+      'no-progress',
+      negatable: false,
+      help: 'Jonli progress o\'rniga oddiy qatorlar.',
+    )
+    // ── Yig'ish ──
+    ..addOption(
+      'target',
+      abbr: 't',
+      help: 'Kirish fayli (standart: lib/main.dart).',
+    )
+    ..addFlag(
+      'tree-shake-icons',
+      defaultsTo: true,
+      help: 'Ishlatilmagan ikonka glyphlarini olib tashlash.',
+    )
+    ..addFlag(
+      'install',
+      abbr: 'i',
+      negatable: false,
+      help: 'Yig\'ilgach ulangan qurilmaga o\'rnatish.',
+    )
+    ..addOption('device', help: 'Qurilma ID (adb devices dagi nom).')
     ..addFlag(
       'restore-gradle',
       negatable: false,

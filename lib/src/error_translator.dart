@@ -1,22 +1,36 @@
 /// Yig'ish xatosining o'zbekcha tushuntirishi va yechimi.
 class TranslatedError {
   TranslatedError({
+    required this.code,
     required this.title,
     required this.reason,
     required this.solutions,
     this.rawLine,
   });
 
+  /// Barqaror mashina kodi — AI agentlari SHU BO'YICHA tarmoqlanadi.
+  ///
+  /// O'zbekcha matn (`title`, `reason`) odamlar uchun. Agent uni hech
+  /// qachon regex bilan tekshirmasligi kerak — tarjima o'zgarsa kod
+  /// o'zgarmaydi.
+  final String code;
+
   final String title;
   final String reason;
   final List<String> solutions;
   final String? rawLine;
+
+  /// Vaqtinchalik muammomi — agent qayta urinib ko'rishi mumkinmi.
+  ///
+  /// Tarmoq uzilishi va qulflangan fayl o'tkinchi; kod xatosi emas.
+  bool get retryable => code == 'NETWORK' || code == 'FILE_LOCKED';
 }
 
 /// Gradle/Flutter log qatorlaridan xatoni topib, o'zbekchaga o'giradi.
 class ErrorTranslator {
   static final List<_Rule> _rules = [
     _Rule(
+      'FLUTTER_NOT_FOUND',
       RegExp(r"flutter buyrug'ini ishga tushirib bo'lmadi"),
       'Flutter topilmadi',
       "'flutter' buyrug'i tizimda topilmadi.",
@@ -27,6 +41,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'GRADLE_BUILD_FAILED',
       RegExp(r'BUILD FAILED|build failed|Gradle build failed', caseSensitive: false),
       "Gradle build xatosi",
       "Gradle loyihani yig'a olmadi - umumiy xato.",
@@ -37,6 +52,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'BUILD_EXCEPTION',
       RegExp(r'FAILURE: Build failed with an exception', caseSensitive: false),
       "Build jarayoni muvaffaqiyatsiz tugadi",
       "Gradle yoki Flutter build jarayonida kritik xato yuz berdi.",
@@ -47,6 +63,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'SIGNING_CONFIG',
       RegExp(r'Signing config .* is not configured|signingConfig', caseSensitive: false),
       "Imzolash sozlamalari noto'g'ri",
       "Release build uchun signing config kerak, lekin topilmadi yoki xato.",
@@ -57,6 +74,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'KEYSTORE_CREDENTIALS',
       RegExp(r'storePassword|keyPassword|keyAlias', caseSensitive: false),
       "Keystore parol yoki alias xatosi",
       "Keystore paroli, key alias yoki key paroli noto'g'ri ko'rsatilgan.",
@@ -67,6 +85,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'GRADLE_TASK_FAILED',
       RegExp(r'Task .* FAILED|Execution failed for task', caseSensitive: false),
       "Gradle vazifasi bajarilmadi",
       "Biror Gradle task muvaffaqiyatsiz tugadi.",
@@ -77,6 +96,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'BUILD_GRADLE_SYNTAX',
       RegExp(r'Could not find .* in build\.gradle', caseSensitive: false),
       "build.gradle da xato",
       "Gradle build fayllari noto'g'ri yoki buzilgan.",
@@ -87,6 +107,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'NATIVE_CPP',
       RegExp(r"Error:.* undefined|Error:.* doesn't name a type|Error:.* undeclared identifier", caseSensitive: false),
       "C++/Native kod xatosi",
       "Native kod (C++ yoki JNI) kompilyatsiya qilinmadi.",
@@ -97,6 +118,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'JAVA_IMPORT',
       RegExp(r'unresolved reference|cannot find symbol|package .* does not exist', caseSensitive: false),
       "Java/Kotlin import xatosi",
       "Java yoki Kotlin kodida import qilingan paket topilmadi.",
@@ -107,6 +129,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'DISK_FULL',
       RegExp(
         r'not enough space on the disk|No space left on device|'
         r'errno = 112|There is not enough space',
@@ -120,6 +143,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'OUT_OF_MEMORY',
       RegExp(r'OutOfMemoryError|Java heap space|GC overhead limit'),
       'Xotira yetishmadi',
       'Gradle uchun ajratilgan operativ xotira (RAM) yetmadi.',
@@ -130,6 +154,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'ANDROID_SDK_MISSING',
       RegExp(r'SDK location not found|ANDROID_HOME|sdk\.dir'),
       'Android SDK topilmadi',
       "Loyihada Android SDK yo'li ko'rsatilmagan.",
@@ -139,6 +164,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'NETWORK',
       RegExp(
         r'Could not (resolve|download|find) .*|Connection (timed out|refused)|UnknownHostException',
       ),
@@ -151,6 +177,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'KEYSTORE',
       RegExp(r'Keystore file .* not found|keystore password was incorrect|key\.properties'),
       'Imzolash kaliti (keystore) muammosi',
       "Release uchun imzolash sozlamalari topilmadi yoki noto'g'ri.",
@@ -161,6 +188,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'AAPT_RESOURCE',
       RegExp(
         r'Android resource linking failed|AAPT: error:|Aapt2Exception|'
         r'resource (style|mipmap|drawable|color|string)/',
@@ -176,6 +204,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'MANIFEST_MERGER',
       RegExp(r'Manifest merger failed|uses-sdk:.*minSdkVersion'),
       'AndroidManifest birlashtirilmadi',
       "Pluginlar manifestlari bir-biriga zid — ko'pincha minSdk past.",
@@ -185,6 +214,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'LINT',
       RegExp(r'lintVitalRelease|Lint found'),
       'Lint tekshiruvi to\'xtatdi',
       "Android lint jiddiy ogohlantirish topdi.",
@@ -194,6 +224,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'JDK_MISMATCH',
       RegExp(r'Unsupported class file major version|Unsupported Java|invalid source release|jvmTarget'),
       'Java/JDK versiyasi mos emas',
       "Loyiha talab qiladigan JDK versiyasi o'rnatilganidan farq qiladi.",
@@ -204,6 +235,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'DUPLICATE_CLASS',
       RegExp(r'Duplicate class|Program type already present'),
       'Takrorlangan kutubxona (duplicate class)',
       "Ikki xil paket bir xil sinfni olib kelgan.",
@@ -214,6 +246,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'R8_MINIFY',
       // Diqqat: shunchaki "proguard" so'zi emas — u oddiy logda ham uchraydi.
       RegExp(
         r"Execution failed for task '[^']*:(minify|r8)[^']*'|"
@@ -228,6 +261,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'DART_COMPILE_ERROR',
       RegExp(r"Target of URI doesn't exist|Error: .*\.dart:\d+|error: .*\.dart:|Expected to find|Undefined name|Undefined class"),
       'Dart kodida xato',
       "Loyiha kodida kompilyatsiya xatosi bor.",
@@ -239,6 +273,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'GRADLE_CONFIG',
       RegExp(r'Gradle sync failed|Configuration .* could not be resolved', caseSensitive: false),
       "Gradle konfiguratsiyasi xato",
       "Gradle loyiha strukturasini to'g'ri o'qiy olmadi.",
@@ -249,6 +284,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'GRADLE_TASK_FAILED',
       RegExp(r'Exception: Gradle task .* failed with exit code \d+', caseSensitive: false),
       "Gradle task muvaffaqiyatsiz",
       "Gradle task ishlamadi.",
@@ -259,6 +295,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'PLUGIN_VERSION',
       RegExp(r'The binary version of its metadata is|This version .* requires plugin'),
       "Plugin versiya moslashtirmasi kerak",
       "Flutter yoki Gradle versiyasi plugin'lar bilan mos kelmayapti.",
@@ -269,6 +306,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'SDK_VERSION_MISMATCH',
       RegExp(
         r'requires Android SDK|'
         r'(compileSdk|minSdk|targetSdk)\w*\s*\(?\d*\)?[^\n]{0,40}'
@@ -282,6 +320,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'FILE_LOCKED',
       RegExp(r'Could not (delete|create|move)|being used by another process|Access is denied'),
       'Fayl band yoki ruxsat yo\'q',
       "Boshqa dastur build papkasidagi faylni ushlab turibdi.",
@@ -292,6 +331,7 @@ class ErrorTranslator {
       ],
     ),
     _Rule(
+      'CMDLINE_TOOLS_MISSING',
       RegExp(r'No Android SDK found|cmdline-tools component is missing'),
       'Android buyruq qatori vositalari yo\'q',
       "Android SDK cmdline-tools o'rnatilmagan.",
@@ -310,6 +350,7 @@ class ErrorTranslator {
         final line = logLines[i];
         if (rule.pattern.hasMatch(line)) {
           return TranslatedError(
+            code: rule.code,
             title: rule.title,
             reason: rule.reason,
             solutions: rule.solutions,
@@ -389,7 +430,10 @@ class ErrorTranslator {
 }
 
 class _Rule {
-  _Rule(this.pattern, this.title, this.reason, this.solutions);
+  _Rule(this.code, this.pattern, this.title, this.reason, this.solutions);
+
+  /// Barqaror mashina kodi (SCREAMING_SNAKE, faqat ASCII).
+  final String code;
 
   final RegExp pattern;
   final String title;
