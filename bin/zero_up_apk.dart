@@ -5,95 +5,76 @@ import 'package:zero_up_apk/zero_up_apk.dart';
 /// Versiyaning yagona manbasi — lib/src/cli.dart dagi zeroUpApkVersion.
 const currentVersion = zeroUpApkVersion;
 
+/// Dart kirish nuqtasi — YIG'ISH DVIGATELI.
+///
+/// Bu yerda menyu, savol yoki fonda ishlaydigan chiqish YO'Q:
+///   * Interaktiv UI faqat Node tomonida (`node/menu.js`)
+///   * `zup update` ni Node bajaradi (Windows ishlab turgan .exe ni
+///     almashtirishga ruxsat bermaydi)
+///   * Fonda yangilanish tekshiruvi olib tashlandi — u `print()` bilan
+///     stdout'ga yozib, jonli progress bar ustiga tushardi va JSON
+///     chiqishini buzardi
 Future<void> main(List<String> args) async {
-  // `update` — bin/zup.js (Node qismi) bajaradi, chunki yangilash zup.exe ni
-  // qayta yasaydi, Windows esa ishlab turgan .exe ni almashtirishga ruxsat
-  // bermaydi. Bu yerga faqat binary to'g'ridan-to'g'ri chaqirilganda tushadi.
+  // Binary to'g'ridan-to'g'ri `zup.exe update` deb chaqirilgan holat.
   if (args.isNotEmpty && (args[0] == 'update' || args[0] == '--update')) {
     await _showUpdateInfo();
     return;
   }
 
-  // Argumentsiz — asosiy menyu.
+  // Argumentsiz — qisqa yo'riqnoma. MENYU OCHILMAYDI.
   if (args.isEmpty) {
-    exitCode = await ZeroUpApkCli().runMainMenu();
+    _showQuickHelp();
+    // Terminal bo'lsa foydalanuvchi ko'rmoqchi bo'lgan — xato emas.
+    // Terminal bo'lmasa (quvurdan chaqirilgan) — buyruq berilmagan, xato.
+    exitCode = stdout.hasTerminal ? 0 : 64;
     return;
-  }
-
-  // Ma'lumot beruvchi buyruqlar (--version, --help) chiqishi toza va bir xil
-  // bo'lishi kerak — fon tekshiruvi tarmoq tezligiga qarab ularning ustiga
-  // xabar chiqarib yuborardi.
-  if (!_isInfoCommand(args)) {
-    _checkUpdateInBackground();
   }
 
   exitCode = await ZeroUpApkCli().run(args);
 }
 
-/// `--version` / `--help` kabi faqat ma'lumot chiqaradigan buyruqmi?
-bool _isInfoCommand(List<String> args) {
-  const infoFlags = {'--version', '-v', '--help', '-h'};
-  return args.any(infoFlags.contains);
-}
-
-/// Fonda yangilanishni tekshirib, faqat yangisi bo'lsa xabar beradi.
-void _checkUpdateInBackground() {
-  Future(() async {
-    try {
-      final checker = UpdateChecker(currentVersion: currentVersion);
-      final latest = await checker.fetchLatestVersion();
-
-      if (latest != null && isNewerVersion(latest, currentVersion)) {
-        print('');
-        print('╭────────────────────────────────────────────────────────╮');
-        print('│  💡 Yangi versiya mavjud!                              │');
-        final row =
-            '│     Hozirgi: $currentVersion → Yangi: $latest'.padRight(57);
-        print('$row│');
-        print('│                                                        │');
-        print('│     Yangilash: zup update                              │');
-        print('╰────────────────────────────────────────────────────────╯');
-        print('');
-      }
-    } catch (_) {
-      // Internet yo'q — jim o'tamiz.
-    }
-  });
+void _showQuickHelp() {
+  final ui = Ui();
+  ui.banner(zeroUpApkVersion);
+  ui.line('  ${ui.bold("TEZ BOSHLASH")}');
+  ui.line();
+  ui.line('    ${ui.cyan("zup apk")}          ${ui.grey("APK yig'ish")}');
+  ui.line('    ${ui.cyan("zup apk --arm64")}  ${ui.grey("eng tez rejim")}');
+  ui.line('    ${ui.cyan("zup aab")}          ${ui.grey("Google Play uchun")}');
+  ui.line('    ${ui.cyan("zup config")}       ${ui.grey("fayllar qayerga tushsin")}');
+  ui.line('    ${ui.cyan("zup --help")}       ${ui.grey("to'liq yordam")}');
+  ui.line();
 }
 
 /// Binary to'g'ridan-to'g'ri `zup.exe update` deb chaqirilganda.
+///
+/// Yangilashning o'zini Node bajaradi — bu yerda faqat holat ko'rsatiladi.
 Future<void> _showUpdateInfo() async {
-  print('');
-  print('╔══════════════════════════════════════════════════════════════╗');
-  print('║                    ⚡ Zero Up APK                           ║');
-  print('╚══════════════════════════════════════════════════════════════╝');
-  print('');
-  print('🔍 Yangi versiya qidirilmoqda...');
+  final ui = Ui();
+  ui.banner(zeroUpApkVersion);
+  ui.step('Yangi versiya qidirilmoqda...');
 
   final checker = UpdateChecker(currentVersion: currentVersion);
   final latest = await checker.fetchLatestVersion();
 
-  print('');
+  ui.line();
   if (latest == null) {
-    print('⚠️  npm ga ulanib bo\'lmadi.');
-    print('   Internet aloqasini tekshirib, qaytadan urinib ko\'ring.');
-    print('');
-    print('📦 Hozirgi versiya: $currentVersion');
-    print('');
+    ui.warn("npm ga ulanib bo'lmadi.");
+    ui.detail("Internet aloqasini tekshirib, qaytadan urinib ko'ring.");
+    ui.detail('Hozirgi versiya: $currentVersion');
+    ui.line();
     exitCode = 1;
     return;
   }
 
   if (!isNewerVersion(latest, currentVersion)) {
-    print('✅ Siz allaqachon eng so\'nggi versiyadasiz ($currentVersion)');
-    print('');
+    ui.ok("Siz allaqachon eng so'nggi versiyadasiz ($currentVersion)");
+    ui.line();
     return;
   }
 
-  print('📦 Yangi versiya mavjud: $latest');
-  print('');
-  print('   Yangilash uchun quyidagini yozing:');
-  print('');
-  print('      zup update');
-  print('');
+  ui.step('Yangi versiya mavjud: $latest');
+  ui.line();
+  ui.detail('Yangilash uchun:  zup update');
+  ui.line();
 }

@@ -126,6 +126,19 @@ class ZupConfig {
     );
   }
 
+  /// Bitta sozlamani olib tashlaydi (standart holatga qaytaradi).
+  ///
+  /// `copyWith` buni qila olmaydi: u `null` ni "o'zgartirmaslik" deb biladi,
+  /// shuning uchun saqlangan qiymatni tozalash imkoni yo'q edi.
+  ZupConfig without(String key) {
+    return ZupConfig(
+      outputDir: key == 'out' ? null : outputDir,
+      openFolder: key == 'open' ? null : openFolder,
+      arm64: key == 'arm64' ? null : arm64,
+      copyOutput: key == 'copy' ? null : copyOutput,
+    );
+  }
+
   bool get isEmpty =>
       outputDir == null &&
       openFolder == null &&

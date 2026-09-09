@@ -2,6 +2,8 @@ import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:ffi/ffi.dart';
+
 /// Windows konsolida UTF-8 ni yoqadi (kirill/lotin belgilari va progress bar
 /// belgilari to'g'ri ko'rinishi uchun). Boshqa OS larda hech narsa qilmaydi.
 void enableUtf8Console() {
@@ -15,6 +17,91 @@ void enableUtf8Console() {
     setConsoleOutputCp(65001);
   } catch (_) {
     // Muhim emas — belgilar oddiy ASCII ga tushib qoladi.
+  }
+}
+
+// Windows konsol rejimi bilan ishlash uchun kerakli doimiylar.
+const _stdInputHandle = -10;
+const _enableVirtualTerminalInput = 0x0200;
+
+/// O'zgartirishdan oldingi konsol rejimi — tiklash uchun saqlanadi.
+int? _savedInputMode;
+
+/// Windows konsolida strelka tugmalarini ANSI ketma-ketligi sifatida
+/// qabul qilishni yoqadi.
+///
+/// NEGA KERAK: Windows konsoli strelka tugmalarini oddiy bayt sifatida
+/// YUBORMAYDI — ular "kalit hodisasi" bo'lib, `stdin` dan o'qiganda umuman
+/// ko'rinmaydi. `ENABLE_VIRTUAL_TERMINAL_INPUT` yoqilsa, konsol ularni
+/// `ESC [ A` / `ESC [ B` ko'rinishida uzatadi. Dart ning
+/// `stdin.lineMode = false` bu rejimni yoqmaydi.
+///
+/// Muvaffaqiyatli bo'lsa `true`. Linux/macOS da terminallar bu ketma-ketlikni
+/// o'zi yuboradi, shuning uchun darhol `true`.
+bool enableArrowKeyInput() {
+  if (!Platform.isWindows) return true;
+
+  try {
+    final kernel32 = DynamicLibrary.open('kernel32.dll');
+
+    final getStdHandle = kernel32
+        .lookupFunction<IntPtr Function(Uint32), int Function(int)>(
+          'GetStdHandle',
+        );
+    final getConsoleMode = kernel32.lookupFunction<
+        Int32 Function(IntPtr, Pointer<Uint32>),
+        int Function(int, Pointer<Uint32>)>('GetConsoleMode');
+    final setConsoleMode = kernel32
+        .lookupFunction<Int32 Function(IntPtr, Uint32), int Function(int, int)>(
+          'SetConsoleMode',
+        );
+
+    final handle = getStdHandle(_stdInputHandle);
+    if (handle == 0 || handle == -1) return false;
+
+    final modePtr = calloc<Uint32>();
+    try {
+      if (getConsoleMode(handle, modePtr) == 0) return false;
+
+      final current = modePtr.value;
+      _savedInputMode ??= current;
+
+      final wanted = current | _enableVirtualTerminalInput;
+      if (wanted == current) return true; // allaqachon yoqilgan
+
+      return setConsoleMode(handle, wanted) != 0;
+    } finally {
+      calloc.free(modePtr);
+    }
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Konsol rejimini asl holiga qaytaradi.
+void restoreArrowKeyInput() {
+  if (!Platform.isWindows) return;
+  final saved = _savedInputMode;
+  if (saved == null) return;
+
+  try {
+    final kernel32 = DynamicLibrary.open('kernel32.dll');
+    final getStdHandle = kernel32
+        .lookupFunction<IntPtr Function(Uint32), int Function(int)>(
+          'GetStdHandle',
+        );
+    final setConsoleMode = kernel32
+        .lookupFunction<Int32 Function(IntPtr, Uint32), int Function(int, int)>(
+          'SetConsoleMode',
+        );
+
+    final handle = getStdHandle(_stdInputHandle);
+    if (handle == 0 || handle == -1) return;
+    setConsoleMode(handle, saved);
+  } catch (_) {
+    // Tiklab bo'lmasa ham dastur ishdan chiqmasligi kerak.
+  } finally {
+    _savedInputMode = null;
   }
 }
 
@@ -82,6 +169,27 @@ class Ui {
       _raw(_color ? '\x1B[2K\r' : '\r${' ' * 100}\r');
       _barActive = false;
     }
+  }
+
+  /// Kursorni yashirish — menyu chizilayotganda miltillab turmasligi uchun.
+  void hideCursor() {
+    if (_color) _raw('\x1B[?25l');
+  }
+
+  /// Kursorni qaytarish. Menyu tugagach CHAQIRILISHI SHART.
+  void showCursor() {
+    if (_color) _raw('\x1B[?25h');
+  }
+
+  /// Kursorni [lines] qator yuqoriga ko'chiradi (menyuni qayta chizish uchun).
+  void moveCursorUp(int lines) {
+    if (lines <= 0) return;
+    if (_color) _raw('\x1B[${lines}A');
+  }
+
+  /// Joriy qatorni tozalaydi — eski, uzunroq matn qolib ketmasligi uchun.
+  void clearLine() {
+    if (_color) _raw('\x1B[2K');
   }
 
   /// Terminalga kursorni qaytarish (dastur tugaganda yoki to'xtatilganda)
