@@ -4,12 +4,14 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:path/path.dart' as p;
 
+import 'build_history.dart';
 import 'build_options.dart';
 import 'build_stats.dart';
 import 'builder.dart';
 import 'command_spec.dart';
 import 'config.dart';
 import 'console.dart';
+import 'device_manager.dart';
 import 'doctor.dart';
 import 'error_translator.dart';
 import 'gradle_tuner.dart';
@@ -186,15 +188,19 @@ class ZeroUpApkCli {
         return _configCommand(results, command, config);
       case DoctorCommand():
         return _doctorCommand(results);
-      case InfoCommand():
       case DevicesCommand():
+        return _devicesCommand();
+      case InfoCommand():
+        return _infoCommand(results, config);
       case LastCommand():
+        return _lastCommand(results, command);
       case InstallCommand():
-        // Keyingi bosqichlarda amalga oshiriladi.
-        ui.error("Bu buyruq hali tayyor emas.");
-        ui.detail('zup 2.0 ning keyingi bosqichida qo\'shiladi.');
+        ui.error("'zup install' hali tayyor emas.");
+        ui.action("Hozircha yig'ish bilan birga", command: 'zup apk -i');
         ui.line();
-        return _finish(64, errorCode: 'NOT_IMPLEMENTED', errorMessage: 'Buyruq hali tayyor emas');
+        return _finish(64,
+            errorCode: 'NOT_IMPLEMENTED',
+            errorMessage: "'zup install' hali tayyor emas");
       case BuildCommand():
       case RestoreGradleCommand():
         break; // loyiha kerak — pastda davom etadi
@@ -494,6 +500,17 @@ class ZeroUpApkCli {
         _reportFailure(result);
         ui.restoreCursor();
         _recordFailure(result, target);
+        _recordHistory(
+          project: project,
+          options: options,
+          totalDuration: DateTime.now().difference(totalStart),
+          delivered: const [],
+          outputDir: null,
+          ok: false,
+          exitCode: 70,
+          logPath: result.logPath,
+          failureCode: ErrorTranslator.translate(result.logTail)?.code,
+        );
         return _finish(70);
       }
 
@@ -553,6 +570,15 @@ class ZeroUpApkCli {
       artifactsByTarget: artifactsByTarget,
     );
 
+    // `-i` — yig'ilgan APK ni qurilmaga o'rnatamiz.
+    if (options.install && delivered.isNotEmpty) {
+      final installError = await _installToDevice(delivered, options);
+      if (installError != null) {
+        ui.restoreCursor();
+        return _finish(installError);
+      }
+    }
+
     if (openFolder && outputDir != null) {
       await _openFolder(outputDir.path);
     }
@@ -575,6 +601,16 @@ class ZeroUpApkCli {
       }
       _json!.setOutputDir(outputDir?.path);
     }
+
+    _recordHistory(
+      project: project,
+      options: options,
+      totalDuration: totalDuration,
+      delivered: delivered,
+      outputDir: outputDir?.path,
+      ok: true,
+      exitCode: 0,
+    );
 
     return _finish(0);
   }
@@ -975,6 +1011,333 @@ class ZeroUpApkCli {
     return 0;
   }
 
+  /// Yig'ishni tarixga yozadi — muvaffaqiyat ham, xato ham.
+  ///
+  /// `build_stats.dart` dan alohida: u har bir konfiguratsiya uchun bitta
+  /// silliqlangan vaqt taxminini saqlaydi va faqat muvaffaqiyatlarni
+  /// yozadi. Tarix esa har bir ishga tushirishni, jumladan xatolarni ham
+  /// ko'rsatishi kerak.
+  void _recordHistory({
+    required ProjectInfo project,
+    required BuildOptions options,
+    required Duration totalDuration,
+    required List<DeliveredFile> delivered,
+    required String? outputDir,
+    required bool ok,
+    required int exitCode,
+    String? logPath,
+    String? failureCode,
+  }) {
+    try {
+      final now = DateTime.now().toUtc();
+      BuildHistory(project.root).add(HistoryEntry(
+        id: now.toIso8601String().replaceAll(RegExp(r'[:.]'), '-'),
+        zupVersion: zeroUpApkVersion,
+        startedAt: now.subtract(totalDuration).toIso8601String(),
+        durationMs: totalDuration.inMilliseconds,
+        ok: ok,
+        exitCode: exitCode,
+        targets: options.targets.map((t) => t.name).toList(),
+        mode: options.mode.name,
+        appVersion: project.fullVersion,
+        onlyArm64: options.onlyArm64,
+        flavor: options.flavor,
+        outputDir: outputDir,
+        logPath: logPath,
+        failureCode: failureCode,
+        artifacts: delivered
+            .map((f) => HistoryArtifact(
+                  fileName: f.name,
+                  path: f.path,
+                  sizeBytes: f.sizeBytes,
+                  abi: f.abi,
+                ))
+            .toList(),
+      ));
+    } catch (_) {
+      // Tarix yozilmasa ham yig'ish muvaffaqiyatli hisoblanadi.
+    }
+  }
+
+  /// `zup info` — loyiha, muhit va sozlamalar haqida.
+  ///
+  /// Agent uchun BIRINCHI chaqiruv: "shu yerda yig'a olamanmi, yo'q bo'lsa
+  /// nega?" degan savolga javob beradi.
+  Future<int> _infoCommand(ArgResults results, ZupConfig config) async {
+    final projectPath = p.normalize(p.absolute(results.option('path') ?? '.'));
+    final project = ProjectInfo.load(projectPath);
+    final system = await SystemInfo.detect();
+
+    final blockers = <Map<String, Object?>>[];
+    if (project == null) {
+      blockers.add({
+        'code': 'NO_PROJECT',
+        'message': "Bu papkada Flutter loyihasi yo'q",
+      });
+    } else if (!project.hasAndroid) {
+      blockers.add({
+        'code': 'NO_ANDROID_DIR',
+        'message': "Loyihada 'android' papkasi yo'q",
+      });
+    }
+
+    final buildable = blockers.isEmpty;
+
+    final json = _json;
+    if (json != null) {
+      json.data['buildable'] = buildable;
+      json.data['blockers'] = blockers;
+      if (project != null) json.setProject(project);
+      json.data['config'] = {
+        'path': ZupConfig.filePath,
+        'exists': ZupConfig.exists,
+        'out': config.outputDir,
+        'open': config.openFolder,
+        'arm64': config.arm64,
+        'copy': config.copyOutput,
+      };
+      json.data['system'] = {
+        'cpuCores': system.cpuCores,
+        'ramGb': system.ramGb,
+        'gradleHeapMb': system.gradleHeapMb,
+        'gradleWorkers': system.gradleWorkers,
+      };
+      json.data['output'] = {
+        'style': ui.out.style.name,
+        'reason': ui.out.reason,
+        'color': ui.out.color,
+        'columns': ui.out.columns,
+      };
+      json.emit(ok: buildable, exitCode: buildable ? 0 : 66);
+      return buildable ? 0 : 66;
+    }
+
+    ui.section('Loyiha');
+    if (project == null) {
+      ui.error("Flutter loyihasi topilmadi");
+      ui.detail(projectPath);
+    } else {
+      ui.kv('Ilova', project.appName);
+      ui.kv('Versiya', project.fullVersion);
+      if (project.applicationId != null) {
+        ui.kv('Application ID', project.applicationId!);
+      }
+      ui.kv('Papka', project.root);
+      ui.kv("Yig'sa bo'ladi", buildable ? 'ha' : "yo'q");
+    }
+
+    ui.section('Sozlamalar');
+    ui.kv('Chiqish papkasi', config.outputDir ?? 'Ish stoli (Desktop)');
+    ui.kv('Papkani ochish', (config.openFolder ?? false) ? 'ha' : "yo'q");
+    ui.kv('Faqat arm64', (config.arm64 ?? false) ? 'ha' : "yo'q");
+
+    ui.section('Kompyuter');
+    ui.kv('Quvvat', system.toString());
+    ui.kv('Gradle xotira', '${system.gradleHeapMb} MB');
+    ui.kv('Parallel oqim', '${system.gradleWorkers}');
+
+    ui.line();
+    for (final blocker in blockers) {
+      ui.error(blocker['message'] as String);
+    }
+    ui.line();
+
+    return buildable ? 0 : 66;
+  }
+
+  /// `zup last` — oxirgi yig'ishlar.
+  Future<int> _lastCommand(ArgResults results, LastCommand command) async {
+    final projectPath = p.normalize(p.absolute(results.option('path') ?? '.'));
+    final history = BuildHistory(projectPath).load();
+    final shown = history.take(command.count).toList();
+
+    final json = _json;
+    if (json != null) {
+      json.data['count'] = shown.length;
+      json.data['projectRoot'] = projectPath;
+      json.data['entries'] = shown
+          .map((HistoryEntry e) => <String, Object?>{
+                ...e.toJson(),
+                'artifacts':
+                    e.artifacts.map((a) => a.toJsonWithExists()).toList(),
+              })
+          .toList();
+      json.emit(ok: true, exitCode: 0);
+      return 0;
+    }
+
+    ui.section("Oxirgi yig'ishlar");
+    if (shown.isEmpty) {
+      ui.note("Hali yig'ish qilinmagan");
+      ui.detail('Birinchi yig\'ishdan keyin bu yerda tarix ko\'rinadi');
+      ui.line();
+      return 0;
+    }
+
+    for (final entry in shown) {
+      final when = entry.startedAtTime;
+      final ago = when == null ? '' : _humanAgo(when);
+      final targets = entry.targets.join('+');
+      final duration = formatDuration(Duration(milliseconds: entry.durationMs));
+
+      if (entry.ok) {
+        ui.done('$targets · ${entry.appVersion ?? ""}', hint: '$duration · $ago');
+        for (final a in entry.artifacts) {
+          final missing = a.exists ? '' : '  (fayl o\'chirilgan)';
+          ui.detail('${a.fileName}  ${formatBytes(a.sizeBytes)}$missing');
+        }
+      } else {
+        ui.error('$targets · ${entry.failureCode ?? "xato"}');
+        ui.detail('$duration · $ago');
+        if (entry.logPath != null) ui.detail('Log: ${entry.logPath}');
+      }
+    }
+    ui.line();
+    return 0;
+  }
+
+  static String _humanAgo(DateTime time) {
+    final diff = DateTime.now().difference(time.toLocal());
+    if (diff.inMinutes < 1) return 'hozirgina';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} daqiqa oldin';
+    if (diff.inHours < 24) return '${diff.inHours} soat oldin';
+    return '${diff.inDays} kun oldin';
+  }
+
+  /// `zup devices` — ulangan qurilmalar.
+  Future<int> _devicesCommand() async {
+    final manager = DeviceManager();
+    final adb = manager.adbPath;
+
+    if (adb == null) {
+      ui.error("adb topilmadi — qurilmalarni ko'rib bo'lmaydi");
+      ui.action("Android SDK platform-tools ni o'rnating");
+      ui.line();
+      return _finish(69,
+          errorCode: 'ADB_NOT_FOUND', errorMessage: 'adb topilmadi');
+    }
+
+    final devices = await manager.listDevices();
+
+    final json = _json;
+    if (json != null) {
+      json.data['adb'] = {'found': true, 'path': adb};
+      json.data['devices'] = devices.map((d) => d.toJson()).toList();
+      json.emit(ok: true, exitCode: 0);
+      return 0;
+    }
+
+    ui.section('Ulangan qurilmalar');
+    if (devices.isEmpty) {
+      ui.note('Qurilma topilmadi');
+      ui.detail('USB orqali ulang yoki emulyatorni ishga tushiring');
+      ui.detail("Telefonda 'USB debugging' yoqilganini tekshiring");
+      ui.line();
+      return 0;
+    }
+
+    for (final device in devices) {
+      if (device.isReady) {
+        ui.done(device.displayName, hint: device.id);
+        if (device.supportedAbis.isNotEmpty) {
+          ui.detail('ABI: ${device.supportedAbis.take(3).join(", ")}');
+        }
+      } else {
+        ui.warn('${device.displayName} — ${device.state}');
+        if (device.state == 'unauthorized') {
+          ui.action('Telefondagi "USB debugging" so\'roviga ruxsat bering');
+        }
+      }
+    }
+    ui.line();
+    ui.detail("O'rnatish uchun:  zup apk -i");
+    ui.line();
+    return 0;
+  }
+
+  /// Yig'ilgan APK ni qurilmaga o'rnatadi.
+  ///
+  /// Qurilma tanlash mantiqi: 0 ta — xato; 1 ta — o'sha; bir nechta va
+  /// `--device` berilmagan — xato (Dart hech qachon savol bermaydi,
+  /// tanlashni Node menyusi qiladi).
+  Future<int?> _installToDevice(
+    List<DeliveredFile> delivered,
+    BuildOptions options,
+  ) async {
+    final manager = DeviceManager();
+    if (manager.adbPath == null) {
+      ui.line();
+      ui.error("adb topilmadi — o'rnatib bo'lmadi");
+      ui.action("Android SDK platform-tools ni o'rnating");
+      _json?.warn('ADB_NOT_FOUND', "adb topilmadi");
+      return 69;
+    }
+
+    final devices =
+        (await manager.listDevices()).where((d) => d.isReady).toList();
+
+    if (devices.isEmpty) {
+      ui.line();
+      ui.error("Ulangan qurilma topilmadi");
+      ui.action('Qurilmalarni ko\'rish', command: 'zup devices');
+      _json?.warn('NO_DEVICE', 'Ulangan qurilma topilmadi');
+      return 69;
+    }
+
+    AndroidDevice device;
+    if (options.deviceId != null) {
+      final match = devices.where((d) => d.id == options.deviceId);
+      if (match.isEmpty) {
+        ui.line();
+        ui.error("Qurilma topilmadi: ${options.deviceId}");
+        ui.action('Qurilmalarni ko\'rish', command: 'zup devices');
+        return 64;
+      }
+      device = match.first;
+    } else if (devices.length == 1) {
+      device = devices.first;
+    } else {
+      ui.line();
+      ui.error("${devices.length} ta qurilma ulangan — qaysinisiga?");
+      for (final d in devices) {
+        ui.detail('${d.id}  —  ${d.displayName}');
+      }
+      ui.action('Masalan', command: 'zup apk -i --device=${devices.first.id}');
+      _json?.warn('MULTIPLE_DEVICES', "${devices.length} ta qurilma ulangan");
+      return 64;
+    }
+
+    final apk = pickApkForDevice(delivered, device);
+    if (apk == null) {
+      ui.line();
+      ui.error("Bu qurilmaga mos APK topilmadi");
+      ui.detail('Qurilma ABI: ${device.supportedAbis.join(", ")}');
+      return 70;
+    }
+
+    ui.line();
+    ui.active("O'rnatilmoqda: ${device.displayName}");
+    final result = await manager.install(
+      apkPath: apk.path,
+      deviceId: device.id,
+    );
+
+    _json?.data['install'] = result.toJson();
+
+    if (result.ok) {
+      ui.done("O'rnatildi — ${apk.name}");
+      ui.line();
+      return null; // xato yo'q
+    }
+
+    ui.error("O'rnatib bo'lmadi");
+    if (result.errorOutput != null) {
+      ui.detail(result.errorOutput!.split('\n').first);
+    }
+    ui.line();
+    return 70;
+  }
+
   /// `zup doctor` — muhitni tekshiradi.
   Future<int> _doctorCommand(ArgResults results) async {
     final projectPath = p.normalize(p.absolute(results.option('path') ?? '.'));
@@ -1215,73 +1578,57 @@ class ZeroUpApkCli {
     ..addMultiOption('extra', help: "flutter build ga qo'shimcha argument.");
 
   void _printUsage(ArgParser parser) {
+    void cmd(String command, String description) {
+      final padded = command.padRight(24);
+      ui.line('    ${ui.cyan(padded)}${ui.grey(description)}');
+    }
+
     ui.line('  ${ui.bold("ISHLATISH")}');
     ui.line();
-    ui.line('    zero_up_apk [apk|aab|hammasi] [sozlamalar]');
-    ui.line('    zup apk --arm64          ${ui.grey("# qisqa nom")}');
+    ui.line('    zup [buyruq] [sozlamalar]');
     ui.line();
-    ui.line('  ${ui.bold("MISOLLAR")}');
+
+    ui.line('  ${ui.bold("YIG'ISH")}');
     ui.line();
-    ui.line(
-      '    ${ui.cyan("zup")}                     '
-      '${ui.grey("interaktiv menyu")}',
-    );
-    ui.line(
-      '    ${ui.cyan("zup apk")}                 '
-      '${ui.grey("release APK (ABI bo'yicha bo'lingan)")}',
-    );
-    ui.line(
-      '    ${ui.cyan("zup apk --arm64")}         '
-      '${ui.grey("eng tez: faqat arm64")}',
-    );
-    ui.line(
-      '    ${ui.cyan("zup aab")}                 '
-      '${ui.grey("Google Play uchun App Bundle")}',
-    );
-    ui.line(
-      '    ${ui.cyan("zup hammasi")}             '
-      '${ui.grey("APK + AAB")}',
-    );
-    ui.line(
-      '    ${ui.cyan("zup apk -p C:\\loyiham")}   '
-      '${ui.grey("boshqa papkadagi loyiha")}',
-    );
-    ui.line(
-      '    ${ui.cyan("zup apk --dart-define=API_URL=https://api.example.com")} '
-      "${ui.grey("Dart define parametrlar bilan yig'ish")}",
-    );
-    ui.line(
-      '    ${ui.cyan("zup --restore-gradle")}    '
-      '${ui.grey("gradle sozlamalarini qaytarish")}',
-    );
+    cmd('zup', 'menyu (eng oson yo\'l)');
+    cmd('zup apk', 'APK yig\'ish');
+    cmd('zup apk --arm64', 'eng tez: faqat arm64');
+    cmd('zup aab', 'Google Play uchun App Bundle');
+    cmd('zup hammasi', 'APK + AAB');
+    cmd('zup apk -i', 'yig\'ib telefonga o\'rnatish');
     ui.line();
-    ui.line('  ${ui.bold("FAYLLAR QAYERGA TUSHADI?")}');
+
+    ui.line('  ${ui.bold("BOSHQA BUYRUQLAR")}');
     ui.line();
-    ui.line(
-      '    ${ui.grey("Standart holatda — ish stoliga (Desktop). O'zgartirish:")}',
-    );
+    cmd('zup config', 'fayllar qayerga tushsin');
+    cmd('zup doctor', 'muhitni tekshirish');
+    cmd('zup info', 'loyiha va sozlamalar haqida');
+    cmd('zup last', 'oxirgi yig\'ishlar');
+    cmd('zup devices', 'ulangan qurilmalar');
+    cmd('zup update', 'yangilash');
     ui.line();
-    ui.line(
-      '    ${ui.cyan("zup config")}              '
-      '${ui.grey("sozlamalar menyusi (eng oson yo'l)")}',
-    );
-    ui.line(
-      '    ${ui.cyan(r"zup config --out D:\APK")} '
-      '${ui.grey("papkani darhol o'rnatish")}',
-    );
-    ui.line(
-      '    ${ui.cyan("zup config reset")}        '
-      '${ui.grey("ish stoliga qaytarish")}',
-    );
-    ui.line(
-      '    ${ui.cyan(r"zup apk --out D:\APK")}    '
-      '${ui.grey("faqat shu safar boshqa papkaga")}',
-    );
-    ui.line(
-      '    ${ui.cyan(r"zup apk --out D:\APK --save")} '
-      '${ui.grey("shu papkani doimiy qilib saqlash")}',
-    );
+
+    ui.line('  ${ui.bold("AI REJIMI")}');
     ui.line();
+    ui.line('    ${ui.grey("Claude Code kabi agentlar uchun: natija JSON, savol yo'q.")}');
+    ui.line();
+    cmd('zup ai apk', 'yig\'ib, natijani JSON qaytaradi');
+    cmd('zup ai info', 'loyiha holati JSON');
+    cmd('zup ai doctor', 'muhit tekshiruvi JSON');
+    ui.line();
+    ui.line('    ${ui.grey("ZUP_OUTPUT=json — har bir chaqiruv JSON qaytaradi")}');
+    ui.line();
+
+    ui.line('  ${ui.bold("FAYLLAR QAYERGA TUSHADI")}');
+    ui.line();
+    ui.line('    ${ui.grey("Standart holatda ish stoliga. O'zgartirish:")}');
+    ui.line();
+    cmd('zup config', 'sozlamalar menyusi');
+    cmd(r'zup config --out D:\APK', 'papkani darhol o\'rnatish');
+    cmd('zup config reset', 'ish stoliga qaytarish');
+    cmd(r'zup apk --out D:\APK', 'faqat shu safar');
+    ui.line();
+
     ui.line('  ${ui.bold("SOZLAMALAR")}');
     ui.line();
     for (final line in parser.usage.split('\n')) {

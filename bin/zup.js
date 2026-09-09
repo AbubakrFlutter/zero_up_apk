@@ -30,6 +30,9 @@ const c = menu.colors;
 /// safar behuda urinib o'tirmaymiz.
 const blockedMarker = path.join(zupDir, 'binary-blocked');
 
+// Terminalni har qanday chiqishda tiklaymiz — Ctrl+C, xato, oddiy chiqish.
+menu.installTerminalGuard();
+
 const argv = process.argv.slice(2);
 
 main();
@@ -130,20 +133,10 @@ function ensureBinaryFresh() {
  */
 async function menuSession(loop) {
   menu.enterAltScreen();
-
-  // Ctrl+C bosilsa ham alternativ ekrandan chiqishimiz shart, aks holda
-  // terminal menyu ekranida qolib ketadi.
-  const onSigint = () => {
-    menu.leaveAltScreen();
-    process.exit(130);
-  };
-  process.on('SIGINT', onSigint);
-
   try {
     return await loop();
   } finally {
-    process.removeListener('SIGINT', onSigint);
-    menu.leaveAltScreen();
+    menu.restoreTerminal();
   }
 }
 

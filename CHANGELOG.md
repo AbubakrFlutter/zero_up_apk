@@ -1,3 +1,116 @@
+## 2.0.0 - 2026-09-09
+
+Katta yangilanish: UI qaytadan qurildi, AI rejimi qo'shildi, xavfli
+xatolar tuzatildi.
+
+### ⚠️ Diqqat — o'zgargan xulq-atvor
+
+**Noto'g'ri buyruq endi APK yig'maydi.** Ilgari `zup reset` yoki `zup apkk`
+deb adashsangiz, "Noma'lum buyruq" deb ogohlantirib, keyin **baribir APK
+yig'a boshlardi** va `android/gradle.properties` faylingizni o'zgartirardi.
+Endi bu qattiq xato (chiqish kodi 64) va yozilishida xato bo'lsa taklif
+ko'rsatadi: `apkk` → `zup apk`.
+
+**`-v` endi versiyani ko'rsatadi** (1.3.3 dan beri). Batafsil log uchun
+`-V` (katta harf).
+
+**Dart binary hech qachon menyu ochmaydi.** Interaktiv UI faqat Node
+tomonida. `echo | zup` kabi holatlarda ilgari savol berolmay standart
+javobni olib, **so'ramasdan APK yig'ardi** — endi aniq xato beradi.
+
+### 🤖 AI rejimi
+
+Claude Code kabi agentlar uchun. To'liq hujjat: [docs/AI.md](docs/AI.md).
+
+```bash
+zup ai apk        # yig'ib, natijani JSON qaytaradi
+zup ai info       # loyiha va muhit holati
+zup ai doctor     # muhit tekshiruvi
+```
+
+`zup apk --json`, `zup -m ai apk` va `ZUP_OUTPUT=json` ham bir xil ishlaydi.
+
+* **stdout'da faqat bitta JSON obyekt** — odamlarga mo'ljallangan matn
+  stderr ga ketadi, `JSON.parse(stdout)` saralashsiz ishlaydi
+* **Barqaror xato kodlari** — 27 ta diagnostikaga mashina kodi qo'shildi
+  (`SIGNING_CONFIG`, `DISK_FULL`, `JDK_MISMATCH`, …). Agent o'zbekcha
+  matnni regex bilan tekshirmasligi kerak
+* **`retryable`** — `NETWORK` va `FILE_LOCKED` o'tkinchi, agent qayta
+  urinishi mumkinligini biladi
+* **`resolvedFrom`** — har bir sozlama qayerdan kelgani (flag/config/default)
+* **`flutterCommand`** — aynan qanday chaqirilgani, takrorlash mumkin
+* **Cheklangan log** — 60 qator + raqamli highlights, agent kontekstini
+  4000 qatorlik log bilan to'ldirmaydi
+
+### ✨ Yangi buyruqlar
+
+| Buyruq | Vazifasi |
+|---|---|
+| `zup doctor` | Flutter, Dart, Java, SDK, adb, disk, imzolashni tekshiradi |
+| `zup info` | loyiha, sozlamalar, kompyuter holati |
+| `zup last` | oxirgi yig'ishlar tarixi (xatolar ham) |
+| `zup devices` | ulangan qurilmalar |
+| `zup config reset <sozlama>` | bitta sozlamani qaytarish |
+
+### ✨ Yangi bayroqlar
+
+`-i/--install` (yig'ib qurilmaga o'rnatish, ABI bo'yicha mos APK tanlaydi) ·
+`-t/--target` (kirish fayli) · `--device` · `--json` · `--ai` · `-q/--quiet` ·
+`--no-color` · `--no-progress` · `--tree-shake-icons`
+
+### 🎨 UI qaytadan qurildi
+
+* **Yagona vizual tizim** — chekinish faqat 2 va 5 (ilgari 2/4/5/6), kalit
+  ustuni hamma joyda bir xil (ilgari 22/12/16), bitta sarlavha uslubi
+* **`✔` faqat haqiqiy muvaffaqiyat uchun** — "Faqat arm64 rejimi",
+  "Paketlar o'zgarmagan" kabi ma'lumot qatorlari endi kulrang `·` bilan.
+  Ilgari hammasi yashil `✔` bilan chiqib, "bajarildi" degan noto'g'ri
+  taassurot qoldirardi
+* **`--ascii` hamma joyda ishlaydi** — ilgari `•`, `→`, `…`, `💡`, `—`
+  qattiq kodlangan edi
+* **Chiqish rejimi bir joyda hal qilinadi** — TTY, CI, `--quiet`, `--json`,
+  `ZUP_OUTPUT`. Sof funksiya, 30 ta sinov bilan qoplangan
+
+### 🐞 Chizish xatolari
+
+* Quti ajratuvchisi endi `├───┤` — ilgari **har bir qutida** `│───│` edi
+* Quti mazmuni o'raladi va qisqartiriladi — ilgari uzun fayl nomlarida
+  chegaradan oshib, yopuvchi `│` keyingi qatorga tushib ketardi
+* Progress bar tor terminalga moslashadi — ilgari 62 ustundan tor bo'lsa
+  o'ralib, ekranda parcha qoldirardi
+* `substring` o'rniga runes — surrogat juftlik kesilib `�` chiqmaydi
+* `wrapText` chekinishni bir marta qo'shadi — ilgari ko'chgan qatorlar
+  8-ustunga siljirdi; chegaradan uzun so'z endi bo'linadi
+* `formatDuration` soat chegarasida `1:05:30` — ilgari `1s 05d` bo'lib,
+  "1 sekund" deb o'qilardi
+* Har run oxirida ortiqcha bo'sh qator qolmaydi
+* `Ctrl+C` dan keyin terminal to'liq tiklanadi (kursor, raw rejim,
+  alternativ ekran) — ilgari kursor yashirin qolardi
+
+### 🐞 Boshqa tuzatishlar
+
+* **Eskirgan binary tuzog'i** — `~/.zup/VERSION` yozilardi-yu, hech kim
+  o'qimasdi. Kompilyatsiya o'rnatishda yiqilsa, eski binary yangi
+  buyruqlarga javob beraverardi
+* `zup update apk` endi ushlanadi (ilgari yig'ishga tushib ketardi)
+* `zup apk config` endi xato beradi (ilgari jim-jimgina hech narsa qilmasdi)
+* `zup --clean` bayroqlari menyudan keyin saqlanadi
+* `--build-number` musbat bo'lishi kerak (0 va manfiy o'tib ketardi)
+* `--flavor`, `--build-name`, `-t` tekshiriladi (umuman tekshirilmasdi)
+* `--extra` zup ning bayrog'ini takrorlasa — xato (`--extra=-v` ikkita
+  `-v` berardi)
+* `--tree-shake-icons` endi boshqariladi (release da qattiq kodlangan edi)
+* Sozlamadan kelgan `arm64` `--split` ni o'chirsa ham ogohlantiradi
+* `--save` endi saqlangan papkani tozalay oladi (`config reset out`)
+* Vaqt taxmini `--clean`, `--dart-define` va kirish faylini hisobga oladi —
+  ilgari `--clean` bilan qilingan yig'ish inkremental taxminni buzardi
+
+### 🧹 Ichki
+
+Dart tomonidan ~430 qator interaktiv kod olib tashlandi (menyular ikki
+joyda takrorlangan edi). Loyiha tartiblandi: `node/`, `test/dart/`,
+`test/node/`, `docs/`. 59 ta avtomatik sinov (ilgari 0 ta edi).
+
 ## 1.4.0 - 2026-09-08
 
 ### 🛠 Endi tayyor .exe yuklab olinmaydi — u sizning kompyuteringizda yasaladi

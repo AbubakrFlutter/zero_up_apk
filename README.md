@@ -8,7 +8,8 @@ buyruq qatori vositasi.
 - 🚀 Kompyuter quvvatiga (RAM / yadro soni) qarab Gradle **avtomat sozlanadi**
 - 📁 Tayyor APK **ish stoliga (Desktop)** — ilova nomi va versiyasi bilan atalgan yangi papkaga tushadi (`zup config` bilan boshqa papkani tanlash mumkin)
 - 🧠 Xatolar **o'zbekcha tushuntiriladi** va yechimi ko'rsatiladi
-- 🔄 **GitHub orqali avtomatik yangilanish** - npm uslubida
+- 🤖 **AI rejimi** — Claude Code kabi agentlar uchun JSON chiqish
+- 🩺 **zup doctor** — muhitdagi muammolarni topib, yechimini aytadi
 
 ```
   ▕████████████████░░░░░░░░░░▏  63%  Kotlin kodi kompilyatsiya qilinmoqda  01:12
@@ -42,26 +43,63 @@ Dart Flutter bilan birga keladi.
 ## Ishlatish
 
 ```bash
+zup                  # Menyu — ↑↓ bilan tanlang (eng oson yo'l)
+
 zup apk              # Release APK (ABI bo'yicha bo'lingan)
 zup apk --arm64      # Eng tez: faqat arm64
+zup apk -i           # Yig'ib telefonga o'rnatish
 zup aab              # Google Play uchun App Bundle
 zup hammasi          # APK + AAB
-zup update           # Yangilash
-zup --help           # Yordam
 ```
+
+### Boshqa buyruqlar
+
+| Buyruq | Vazifasi |
+|--------|----------|
+| `zup doctor` | Flutter, SDK, Java, adb — hammasini tekshiradi |
+| `zup info` | Loyiha, sozlamalar, kompyuter holati |
+| `zup last` | Oxirgi yig'ishlar tarixi |
+| `zup devices` | Ulangan qurilmalar |
+| `zup config` | Fayllar qayerga tushsin |
+| `zup update` | Yangilash |
 
 ### Foydali parametrlar
 
 | Parametr | Ta'rif |
 |----------|--------|
 | `--arm64` | Faqat arm64 — 2-3x tezroq |
+| `-i`, `--install` | Yig'ilgach qurilmaga o'rnatadi (mos APK ni o'zi tanlaydi) |
+| `-t lib/main_dev.dart` | Boshqa kirish fayli (dev/prod uchun) |
 | `--clean` | Avval `flutter clean` |
 | `--obfuscate` | Dart kodini yashirish |
 | `-o`, `--out C:\papka` | Boshqa papkaga chiqarish (faqat shu safar) |
 | `--save` | Berilgan sozlamalarni doimiy qilib saqlash |
 | `--open` | Tugagach papkani ochish |
+| `-q`, `--quiet` | Faqat ogohlantirish va xatolar |
+| `--json` | Natijani JSON qaytarish |
 | `-v` | Versiyani ko'rsatish |
 | `-V` | Batafsil log |
+
+---
+
+## 🤖 AI rejimi
+
+Claude Code kabi kodlash agentlari zup'ni ishonchli boshqarishi uchun:
+
+```bash
+zup ai apk           # Yig'ib, natijani JSON qaytaradi
+zup ai info          # Loyiha va muhit holati
+zup ai doctor        # Muhit tekshiruvi
+```
+
+`stdout` da **faqat bitta JSON obyekt** bo'ladi — odamlarga mo'ljallangan
+matn `stderr` ga ketadi, shuning uchun `JSON.parse` saralashsiz ishlaydi.
+Savol berilmaydi, xatolar barqaror kod bilan qaytadi.
+
+Agent harness'i uchun: `ZUP_OUTPUT=json` o'rnatilsa, har bir chaqiruv JSON
+qaytaradi — `--json` yozish shart emas.
+
+To'liq shartnoma: **[docs/AI.md](docs/AI.md)**
 
 ---
 
@@ -103,7 +141,7 @@ Tool har safar ishga tushganda ham tekshirib turadi:
 ```
 ╭────────────────────────────────────────────────────────╮
 │  💡 Yangi versiya mavjud!                              │
-│     Hozirgi: 1.4.0 → Yangi: 1.5.0                      │
+│     Hozirgi: 2.0.0 → Yangi: 2.1.0                      │
 │                                                        │
 │     Yangilash: zup update                              │
 ╰────────────────────────────────────────────────────────╯
@@ -127,7 +165,7 @@ Tool har safar ishga tushganda ham tekshirib turadi:
 
 - Flutter SDK (PATH da) — Dart u bilan birga keladi
 - Android SDK + JDK
-- Node.js 14+ (npm uchun)
+- Node.js 18+ (npm uchun)
 
 Alohida Dart SDK o'rnatish shart emas.
 

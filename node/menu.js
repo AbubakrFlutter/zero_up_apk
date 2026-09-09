@@ -57,6 +57,56 @@ function clearScreen() {
   process.stdout.write(`${ESC}[2J${ESC}[H`);
 }
 
+/**
+ * Terminalni har qanday holatda asl holiga qaytaradi.
+ *
+ * NEGA KERAK: `Ctrl+C` bosilganda `select()` ning tozalash kodi
+ * ishlamay qolardi — xom (raw) rejim tiklanmas va yashirilgan kursor
+ * ko'rinmas edi. Natijada foydalanuvchi terminalida yozgan narsasi
+ * ko'rinmay qolardi.
+ *
+ * `SIGINT`, `SIGTERM`, `exit` va ushlanmagan istisnoda chaqiriladi.
+ */
+function restoreTerminal() {
+  try {
+    if (process.stdin.setRawMode && process.stdin.isRaw) {
+      process.stdin.setRawMode(false);
+    }
+  } catch (_) {}
+  try {
+    process.stdin.pause();
+  } catch (_) {}
+  if (colorsEnabled) {
+    // Alternativ ekrandan chiqamiz va kursorni ko'rsatamiz.
+    process.stdout.write(`${ESC}[?1049l${ESC}[?25h`);
+  }
+}
+
+/** Terminalni tiklashni barcha chiqish yo'llariga bog'laydi. */
+function installTerminalGuard() {
+  let done = false;
+  const cleanup = () => {
+    if (done) return;
+    done = true;
+    restoreTerminal();
+  };
+
+  process.on('exit', cleanup);
+  process.on('SIGINT', () => {
+    cleanup();
+    process.exit(130);
+  });
+  process.on('SIGTERM', () => {
+    cleanup();
+    process.exit(143);
+  });
+  process.on('uncaughtException', (err) => {
+    cleanup();
+    console.error(err);
+    process.exit(1);
+  });
+}
+
 /** Istalgan tugma bosilishini kutadi. */
 function pressAnyKey(message = 'Davom etish uchun istalgan tugmani bosing...') {
   if (!isInteractive()) return Promise.resolve();
@@ -404,5 +454,7 @@ module.exports = {
   clearScreen,
   pressAnyKey,
   pager,
+  restoreTerminal,
+  installTerminalGuard,
   colors: c,
 };
