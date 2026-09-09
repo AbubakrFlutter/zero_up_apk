@@ -137,9 +137,38 @@ class Ui {
     _barActive = false;
   }
 
+  /// Oxirgi yozilgan qator bo'sh edimi.
+  ///
+  /// Boshida `false` — birinchi bo'sh qator chiqadi va chiqishni terminal
+  /// buyruq satridan ajratadi.
+  bool _lastWasBlank = false;
+
+  /// Qator yozadi.
+  ///
+  /// KETMA-KET BO'SH QATORLAR BIRLASHTIRILADI. Bu chizish darajasidagi
+  /// qoida: har bir blok o'z bo'sh qatorini qo'shadi va bloklar ketma-ket
+  /// kelganda ikkita bo'sh qator chiqib ketardi. Har bir chaqiruv joyini
+  /// alohida tuzatish o'rniga invariantni shu yerda ushlab turamiz.
   void line([String text = '']) {
     _clearBar();
+
+    final isBlank = text.trim().isEmpty;
+    if (isBlank && _lastWasBlank) return;
+
     _sink.writeln(text);
+    _lastWasBlank = isBlank;
+  }
+
+  /// Chiqishni yakunlaydi — aynan bitta bo'sh qator qoldiradi.
+  ///
+  /// Shunda terminal buyruq satri natijaga yopishib qolmaydi.
+  void endOutput() {
+    _clearBar();
+    if (_color) _raw('\x1B[?25h');
+    if (!_lastWasBlank) {
+      _sink.writeln();
+      _lastWasBlank = true;
+    }
   }
 
   /// Kursorni ko'rsatadi va progress qatorini tozalaydi.
@@ -169,8 +198,9 @@ class Ui {
     );
     if (subtitle != null) line('$_indent${grey(subtitle)}');
     line('$_indent${cyan(rule)}');
-    // Yakunlovchi bo'sh qator QO'SHILMAYDI — keyingi blok o'zi qo'shadi.
-    // Ilgari ikkalasi ham qo'shib, ikkita bo'sh qator chiqardi.
+    // Ketma-ket bo'sh qatorlar `line()` da birlashtiriladi, shuning uchun
+    // buni qo'shish xavfsiz: keyingi blok ham qo'shsa, bittasi qoladi.
+    line();
   }
 
   /// Bo'lim sarlavhasi.

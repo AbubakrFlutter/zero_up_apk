@@ -71,7 +71,30 @@ class ZeroUpApkCli {
     return code;
   }
 
+  /// Buyruqni bajaradi va chiqishni HAR DOIM to'g'ri yakunlaydi.
+  ///
+  /// `_run` da o'nlab qaytish nuqtasi bor — har birida yakunlashni
+  /// eslab qolish o'rniga invariantni shu yerda ushlab turamiz:
+  /// chiqish aynan bitta bo'sh qator bilan tugaydi va kursor ko'rinadi,
+  /// shunda terminal buyruq satri natijaga yopishib qolmaydi.
   Future<int> run(List<String> args) async {
+    try {
+      return await _run(args);
+    } finally {
+      // JSON rejimida stdout'da faqat JSON bo'lishi kerak — bo'sh qator
+      // ham qo'shilmaydi.
+      final json = _json;
+      if (json == null) {
+        try {
+          ui.endOutput();
+        } catch (_) {
+          // `ui` hali yaratilmagan bo'lishi mumkin (juda erta xato).
+        }
+      }
+    }
+  }
+
+  Future<int> _run(List<String> args) async {
     enableUtf8Console();
 
     final parser = _buildParser();
@@ -486,7 +509,7 @@ class ZeroUpApkCli {
           success: false,
         );
         if (result.cancelled) {
-          ui.restoreCursor();
+          ui.endOutput();
           _json?.setFailure(
             phase: FailurePhase.gradle,
             target: target,
@@ -498,7 +521,7 @@ class ZeroUpApkCli {
           return _finish(130);
         }
         _reportFailure(result);
-        ui.restoreCursor();
+        ui.endOutput();
         _recordFailure(result, target);
         _recordHistory(
           project: project,
@@ -574,7 +597,7 @@ class ZeroUpApkCli {
     if (options.install && delivered.isNotEmpty) {
       final installError = await _installToDevice(delivered, options);
       if (installError != null) {
-        ui.restoreCursor();
+        ui.endOutput();
         return _finish(installError);
       }
     }
@@ -584,7 +607,7 @@ class ZeroUpApkCli {
     }
 
     // Terminal kursorini tiklash
-    ui.restoreCursor();
+    ui.endOutput();
 
     if (_json != null) {
       for (final entry in artifactsByTarget.entries) {
@@ -1422,7 +1445,7 @@ class ZeroUpApkCli {
   void _installSignalHandler() {
     try {
       _signalSubscription = ProcessSignal.sigint.watch().listen((_) {
-        ui.restoreCursor();
+        ui.endOutput();
         ui.warn("To'xtatilmoqda...");
         _builder?.cancel();
       });
