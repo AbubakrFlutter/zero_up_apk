@@ -286,7 +286,10 @@ class FlutterBuilder {
           final milestone = (tracker.percent ~/ 10) * 10;
           if (milestone > lastMilestone) {
             lastMilestone = milestone;
-            ui.line('    $milestone% — ${tracker.label}');
+            // Yagona vizual tizim orqali — ilgari bu qatorlar 4 ta
+            // bo'shliq bilan chekinib, qattiq kodlangan `—` ishlatardi
+            // va `--ascii` ni buzardi.
+            ui.note('${milestone.toString().padLeft(3)}%', hint: tracker.label);
           }
         }
       });
